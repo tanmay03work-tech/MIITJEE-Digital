@@ -1,0 +1,53 @@
+{
+  "name": "miitjee-classes",
+  "version": "1.1.0",
+  "private": true,
+  "scripts": {
+    "postinstall": "node scripts/fix-document-picker-android.js && node scripts/fix-splash-screen-android.js && node scripts/fix-worklets-android.js && node scripts/fix-reanimated-android.js",
+    "android": "node scripts/run-android.js",
+    "android:build": "node scripts/build-android.js",
+    "android:bundle": "node scripts/build-android.js release",
+    "start": "node scripts/start-metro.js",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "2.1.2",
+    "@react-native-community/datetimepicker": "^9.1.0",
+    "@react-native-community/netinfo": "^12.0.1",
+    "@react-navigation/bottom-tabs": "^7.0.0",
+    "@react-navigation/native": "^7.0.0",
+    "@react-navigation/native-stack": "^7.0.0",
+    "axios": "^1.13.2",
+    "lucide-react-native": "^0.546.0",
+    "react": "19.2.3",
+    "react-native": "0.84.0",
+    "react-native-document-picker": "^9.3.1",
+    "react-native-gesture-handler": "^2.28.0",
+    "react-native-linear-gradient": "^2.8.3",
+    "react-native-reanimated": "4.3.0",
+    "react-native-safe-area-context": "^5.5.2",
+    "react-native-screens": "^4.18.0",
+    "react-native-splash-screen": "^3.3.0",
+    "react-native-svg": "^15.15.0",
+    "react-native-worklets": "0.8.1",
+    "zustand": "^5.0.8"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.28.0",
+    "@babel/preset-env": "^7.28.0",
+    "@babel/runtime": "^7.28.0",
+    "@react-native-community/cli": "^20.1.3",
+    "@react-native-community/cli-platform-android": "20.1.0",
+    "@react-native/babel-preset": "0.84.0",
+    "@react-native/metro-config": "0.84.0",
+    "@react-native/typescript-config": "0.84.0",
+    "@types/react": "^19.2.0",
+    "typescript": "^5.8.3"
+  },
+  "overrides": {
+    "hermes-compiler": "250829098.0.10"
+  },
+  "engines": {
+    "node": ">=22.11.0"
+  }
+}
