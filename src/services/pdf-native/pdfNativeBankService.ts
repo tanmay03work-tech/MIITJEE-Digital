@@ -1,7 +1,12 @@
 import { PdfNativeQuestion, QuestionReviewStatus, QuestionSubject, QuestionType } from './pdfNativeTypes';
-import { selectRows, upsertRows, updateRows } from '../supabase/client';
+import { selectRows, upsertRows, updateRows, deleteRows } from '../supabase/client';
 import { PdfNativeQuestionRow } from '../supabase/types';
-import { getLocalPdfNativeQuestions, saveLocalPdfNativeQuestions } from './pdfNativeLocalStorage';
+import {
+  getLocalPdfNativeQuestions,
+  saveLocalPdfNativeQuestions,
+  deleteLocalPdfNativeQuestion,
+  getLocalPdfNativeTestQuestions,
+} from './pdfNativeLocalStorage';
 
 declare const process: { env: Record<string, string> };
 
@@ -289,6 +294,68 @@ export async function updatePdfNativeQuestion(
   } catch (err) {
     console.error('[updatePdfNativeQuestion] Remote Supabase update failed:', err);
     return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+
+  return { success: true };
+}
+
+/**
+ * Delete a question from the PDF-Native Question Bank with strict relationship safety.
+ * If the question is linked to any active tests, deletion is safely blocked.
+ */
+export async function deletePdfNativeQuestion(
+  questionId: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!questionId || typeof questionId !== 'string') {
+    return { success: false, error: 'Invalid question ID provided.' };
+  }
+
+  // 1. Safety check: Remote test references in pdf_native_test_questions
+  try {
+    const testLinks = await selectRows<{ test_id: string }>(
+      'pdf_native_test_questions',
+      'test_id',
+      { question_id: `eq.${questionId}` }
+    );
+
+    if (testLinks && testLinks.length > 0) {
+      return {
+        success: false,
+        error: 'This question is currently used in one or more tests. It cannot be permanently deleted until it is removed from those tests.',
+      };
+    }
+  } catch (checkErr) {
+    console.warn('[deletePdfNativeQuestion] Remote test reference check warning:', checkErr);
+  }
+
+  // 2. Safety check: Local test references
+  try {
+    const localTestQuestions = await getLocalPdfNativeTestQuestions();
+    const isLinkedToLocalTest = localTestQuestions.some((tq) => tq.question_id === questionId);
+    if (isLinkedToLocalTest) {
+      return {
+        success: false,
+        error: 'This question is currently used in one or more tests. It cannot be permanently deleted until it is removed from those tests.',
+      };
+    }
+  } catch {
+    // Continue
+  }
+
+  // 3. Delete from local persistent storage first
+  try {
+    await deleteLocalPdfNativeQuestion(questionId);
+  } catch (localErr) {
+    console.warn('[deletePdfNativeQuestion] Local cleanup warning:', localErr);
+  }
+
+  // 4. Delete from Supabase (fails gracefully in offline/mock environment)
+  try {
+    // Cleanup junction records first if any
+    await deleteRows('pdf_native_set_questions', { question_id: `eq.${questionId}` }).catch(() => undefined);
+    await deleteRows('pdf_native_questions', { id: `eq.${questionId}` });
+  } catch (err) {
+    console.warn('[deletePdfNativeQuestion] Remote Supabase delete skipped (deleted locally):', err);
   }
 
   return { success: true };

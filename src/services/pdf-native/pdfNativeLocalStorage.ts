@@ -361,7 +361,7 @@ export async function getLocalPdfNativeTest(testId: string): Promise<PdfNativeTe
  * Get relations for a specific test.
  */
 export async function getLocalPdfNativeTestQuestions(
-  testId: string
+  testId?: string
 ): Promise<PdfNativeTestQuestion[]> {
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEYS.TEST_QUESTIONS);
@@ -371,7 +371,10 @@ export async function getLocalPdfNativeTestQuestions(
   } catch (err) {
     // Use memory cache
   }
-  return memoryTestQuestions.filter((tq) => tq.test_id === testId).sort((a, b) => a.order_index - b.order_index);
+  if (testId) {
+    return memoryTestQuestions.filter((tq) => tq.test_id === testId).sort((a, b) => a.order_index - b.order_index);
+  }
+  return memoryTestQuestions;
 }
 
 /**
@@ -588,3 +591,50 @@ export async function deleteLocalPdfNativeSet(setId: string): Promise<void> {
     // Memory cache maintained
   }
 }
+
+/**
+ * Delete a question from local persistent storage.
+ */
+export async function deleteLocalPdfNativeQuestion(questionId: string): Promise<void> {
+  const existing = await getLocalPdfNativeQuestions();
+  const filtered = existing.filter((q) => q.id !== questionId);
+  memoryQuestions = filtered;
+  try {
+    await AsyncStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(filtered));
+  } catch {
+    // In-memory cache maintained
+  }
+
+  // Also remove from local set questions junction
+  try {
+    const raw = await AsyncStorage.getItem(STORAGE_KEYS.SET_QUESTIONS);
+    if (raw) {
+      memorySetQuestions = JSON.parse(raw);
+    }
+  } catch {
+    // Cache
+  }
+  memorySetQuestions = memorySetQuestions.filter((sq) => sq.question_id !== questionId);
+  try {
+    await AsyncStorage.setItem(STORAGE_KEYS.SET_QUESTIONS, JSON.stringify(memorySetQuestions));
+  } catch {
+    // Cache
+  }
+
+  // Also remove from local test questions junction
+  try {
+    const rawTq = await AsyncStorage.getItem(STORAGE_KEYS.TEST_QUESTIONS);
+    if (rawTq) {
+      memoryTestQuestions = JSON.parse(rawTq);
+    }
+  } catch {
+    // Cache
+  }
+  memoryTestQuestions = memoryTestQuestions.filter((tq) => tq.question_id !== questionId);
+  try {
+    await AsyncStorage.setItem(STORAGE_KEYS.TEST_QUESTIONS, JSON.stringify(memoryTestQuestions));
+  } catch {
+    // Cache
+  }
+}
+

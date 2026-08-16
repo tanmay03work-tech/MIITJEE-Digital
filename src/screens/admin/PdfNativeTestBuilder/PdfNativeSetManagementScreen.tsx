@@ -52,7 +52,7 @@ import {
   getPdfNativeSetQuestions,
   listPdfNativeSets,
 } from '../../../services/pdf-native/pdfNativeSetService';
-import { updatePdfNativeQuestion } from '../../../services/pdf-native/pdfNativeBankService';
+import { updatePdfNativeQuestion, deletePdfNativeQuestion } from '../../../services/pdf-native/pdfNativeBankService';
 import { extractPdfPagesMetadata } from '../../../services/pdf-native/pdfNativeParser';
 import { getPdfDocument, attachPdfBinary } from '../../../services/pdf-native/pdfDocumentCache';
 import { PdfNativePreview } from './PdfNativePreview';
@@ -236,6 +236,56 @@ export function PdfNativeSetManagementScreen({
       Alert.alert('Error', err instanceof Error ? err.message : 'Failed to save question edits.');
     }
   }, []);
+
+  // Delete individual question from Question Bank & Set
+  const handleDeleteQuestion = useCallback(
+    (question: PdfNativeQuestion) => {
+      Alert.alert(
+        'Delete Question?',
+        `Are you sure you want to permanently delete Q${question.question_number} from this Question Bank?\n\nThis action cannot be undone.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete Question',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                const res = await deletePdfNativeQuestion(question.id);
+                if (!res.success) {
+                  Alert.alert('Cannot Delete Question', res.error || 'Unable to delete question. Please try again.');
+                  return;
+                }
+
+                // Update UI state immediately
+                setInspectingQuestions((prev) => {
+                  const nextList = prev.filter((q) => q.id !== question.id);
+                  if (selectedInspectQuestion?.id === question.id) {
+                    setSelectedInspectQuestion(nextList[0] || null);
+                    setIsEditingQuestion(false);
+                  }
+                  return nextList;
+                });
+
+                // Update set counts in sets list
+                setSets((prev) =>
+                  prev.map((s) =>
+                    s.id === inspectingSet?.id
+                      ? { ...s, total_questions: Math.max(0, s.total_questions - 1) }
+                      : s
+                  )
+                );
+
+                Alert.alert('Question Deleted', `Question Q${question.question_number} has been permanently deleted.`);
+              } catch (err) {
+                Alert.alert('Error', err instanceof Error ? err.message : 'Unable to delete question. Please try again.');
+              }
+            },
+          },
+        ]
+      );
+    },
+    [inspectingSet, selectedInspectQuestion]
+  );
 
   // Delete Set with strict safety semantics
   const handleDeleteSet = useCallback(
@@ -559,26 +609,37 @@ export function PdfNativeSetManagementScreen({
                             />
                           </View>
 
-                          <TouchableOpacity
-                            style={[
-                              styles.editToggleBtn,
-                              isEditingQuestion && styles.editToggleBtnActive,
-                            ]}
-                            onPress={() => setIsEditingQuestion((v) => !v)}
-                            activeOpacity={0.7}
-                          >
-                            {isEditingQuestion ? (
-                              <>
-                                <Eye size={14} color={colors.primary} />
-                                <Text style={styles.editToggleBtnText}>View Mode 👁️</Text>
-                              </>
-                            ) : (
-                              <>
-                                <Edit3 size={14} color={colors.white} />
-                                <Text style={styles.editToggleBtnTextActive}>Edit Question ✏️</Text>
-                              </>
-                            )}
-                          </TouchableOpacity>
+                          <View style={styles.detailHeaderActions}>
+                            <TouchableOpacity
+                              style={[
+                                styles.editToggleBtn,
+                                isEditingQuestion && styles.editToggleBtnActive,
+                              ]}
+                              onPress={() => setIsEditingQuestion((v) => !v)}
+                              activeOpacity={0.7}
+                            >
+                              {isEditingQuestion ? (
+                                <>
+                                  <Eye size={14} color={colors.primary} />
+                                  <Text style={styles.editToggleBtnText}>View Mode 👁️</Text>
+                                </>
+                              ) : (
+                                <>
+                                  <Edit3 size={14} color={colors.white} />
+                                  <Text style={styles.editToggleBtnTextActive}>Edit Question ✏️</Text>
+                                </>
+                              )}
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              style={styles.deleteQuestionBtn}
+                              onPress={() => handleDeleteQuestion(selectedInspectQuestion)}
+                              activeOpacity={0.7}
+                            >
+                              <Trash2 size={14} color="#DC2626" />
+                              <Text style={styles.deleteQuestionBtnText}>Delete Question</Text>
+                            </TouchableOpacity>
+                          </View>
                         </View>
 
                         {/* ============= VIEW MODE ============= */}
@@ -1065,6 +1126,27 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
     color: colors.text,
+  },
+  detailHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  deleteQuestionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    paddingVertical: 6,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.sm,
+  },
+  deleteQuestionBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#DC2626',
   },
   editToggleBtn: {
     flexDirection: 'row',
