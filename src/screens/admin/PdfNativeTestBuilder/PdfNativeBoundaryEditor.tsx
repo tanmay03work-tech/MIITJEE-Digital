@@ -52,13 +52,15 @@ export function PdfNativeBoundaryEditor({ question, onUpdateQuestion }: PdfNativ
 
   const handleSave = () => {
     const primaryBbox = regions[0]?.bbox || question.bbox;
-    const pageEnd = regions.reduce((max, r) => Math.max(max, r.pageNumber), question.page_start || 1);
+    const pageStart = regions[0]?.pageNumber || question.page_start || 1;
+    const pageEnd = regions.reduce((max, r) => Math.max(max, r.pageNumber), pageStart);
 
     onUpdateQuestion({
       ...question,
       bbox: primaryBbox,
-      regions: regions.length > 1 ? regions : undefined,
+      page_start: pageStart,
       page_end: pageEnd,
+      regions: regions.map((r, i) => ({ ...r, orderIndex: i })),
       review_status: status,
     });
   };
