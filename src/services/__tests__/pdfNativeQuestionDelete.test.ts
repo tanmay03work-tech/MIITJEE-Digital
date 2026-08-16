@@ -12,6 +12,12 @@ import {
 } from '../pdf-native/pdfNativeTestService';
 import { PdfNativeQuestion } from '../pdf-native/pdfNativeTypes';
 
+declare const describe: any;
+declare const it: any;
+declare const expect: any;
+declare const beforeAll: any;
+declare const afterAll: any;
+
 describe('PDF-Native Question Bank — Delete Question with Safety Isolation', () => {
   const testPdfId = `del_test_pdf_${Date.now()}`;
   const qDraft: PdfNativeQuestion = {
