@@ -13,7 +13,7 @@ import { pickSingle } from '../../../components/common/DocumentPickerWeb';
 import { uploadExamAsset } from '../../../services/api/storage';
 import { extractPdfPagesMetadata } from '../../../services/pdf-native/pdfNativeParser';
 import { detectQuestionsFromPdf } from '../../../services/pdf-native/pdfQuestionDetector';
-import { savePdfNativeQuestionBankBatch } from '../../../services/pdf-native/pdfNativeBankService';
+import { savePdfNativeQuestionBankBatch, updatePdfNativeQuestion } from '../../../services/pdf-native/pdfNativeBankService';
 import { createPdfNativeSet } from '../../../services/pdf-native/pdfNativeSetService';
 import { savePdfBinary, attachPdfBinary, computeCanonicalPdfId } from '../../../services/pdf-native/pdfDocumentCache';
 import { PdfNativeQuestion, PdfPageMetadata, QuestionSubject } from '../../../services/pdf-native/pdfNativeTypes';
@@ -110,10 +110,17 @@ export function PdfNativeTestBuilderScreen({ navigation }: RootStackScreenProps<
     setBatchSelectedIds(new Set());
   };
 
-  const handleUpdateQuestion = (updated: PdfNativeQuestion) => {
+  const handleUpdateQuestion = async (updated: PdfNativeQuestion) => {
     setQuestions((prev) => prev.map((q) => (q.id === updated.id ? updated : q)));
     setSelectedQuestion(updated);
-    Alert.alert('Saved', `Metadata for Question Q${updated.question_number} updated.`);
+
+    try {
+      await updatePdfNativeQuestion(updated);
+    } catch (err) {
+      console.warn('[handleUpdateQuestion] Persistence error:', err);
+    }
+
+    Alert.alert('Saved', `Metadata and boundary for Question Q${updated.question_number} updated.`);
   };
 
   // Save selected questions to PDF-Native Question Bank

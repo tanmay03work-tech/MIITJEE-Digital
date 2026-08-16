@@ -114,26 +114,36 @@ export async function savePdfNativeQuestionBankBatch(
 
   // 2. Attempt saving to Supabase (fails gracefully if schema table is missing on remote)
   const nowIso = new Date().toISOString();
-  const rows: PdfNativeQuestionRow[] = validatedQuestions.map((q) => ({
-    id: q.id || `pdf_q_${pdfId}_${q.question_number}_${Date.now()}`,
-    pdf_id: pdfId,
-    pdf_url: pdfUrl || q.pdf_url || '',
-    question_number: q.question_number,
-    page_start: q.page_start,
-    page_end: q.page_end,
-    bbox: q.bbox,
-    subject: q.subject || 'Physics',
-    chapter: q.chapter ?? null,
-    topic: q.topic ?? null,
-    question_type: q.question_type || 'MCQ',
-    correct_answer: q.correct_answer ?? null,
-    marks: Number(q.marks) || 4,
-    negative_marks: Number(q.negative_marks) || 1,
-    review_status: q.review_status || 'NEEDS_REVIEW',
-    raw_text: q.raw_detected_text ?? null,
-    created_at: nowIso,
-    updated_at: nowIso,
-  }));
+  const rows: PdfNativeQuestionRow[] = validatedQuestions.map((q) => {
+    const bboxWithRegions = {
+      x: q.bbox.x,
+      y: q.bbox.y,
+      width: q.bbox.width,
+      height: q.bbox.height,
+      ...(q.regions && q.regions.length > 0 ? { regions: q.regions } : {}),
+    };
+
+    return {
+      id: q.id || `pdf_q_${pdfId}_${q.question_number}_${Date.now()}`,
+      pdf_id: pdfId,
+      pdf_url: pdfUrl || q.pdf_url || '',
+      question_number: q.question_number,
+      page_start: q.page_start,
+      page_end: q.page_end,
+      bbox: bboxWithRegions,
+      subject: q.subject || 'Physics',
+      chapter: q.chapter ?? null,
+      topic: q.topic ?? null,
+      question_type: q.question_type || 'MCQ',
+      correct_answer: q.correct_answer ?? null,
+      marks: Number(q.marks) || 4,
+      negative_marks: Number(q.negative_marks) || 1,
+      review_status: q.review_status || 'NEEDS_REVIEW',
+      raw_text: q.raw_detected_text ?? null,
+      created_at: nowIso,
+      updated_at: nowIso,
+    };
+  });
 
   try {
     await upsertRows<PdfNativeQuestionRow>(
@@ -191,14 +201,29 @@ export async function listPdfNativeBankQuestions(pdfId?: string): Promise<PdfNat
 
     if (rows && rows.length > 0) {
       for (const r of rows) {
+        const rawBbox = r.bbox as any;
+        const regions = Array.isArray(rawBbox?.regions)
+          ? rawBbox.regions
+          : Array.isArray((r as any).regions)
+          ? (r as any).regions
+          : undefined;
+
+        const cleanBbox = {
+          x: Number(rawBbox?.x ?? 0),
+          y: Number(rawBbox?.y ?? 0),
+          width: Number(rawBbox?.width ?? 0),
+          height: Number(rawBbox?.height ?? 0),
+        };
+
         qMap.set(r.id, {
           id: r.id,
           pdf_id: r.pdf_id,
           pdf_url: r.pdf_url,
           question_number: r.question_number,
-          page_start: r.page_start,
-          page_end: r.page_end,
-          bbox: r.bbox,
+          page_start: Number(r.page_start) || 1,
+          page_end: Number(r.page_end) || Number(r.page_start) || 1,
+          bbox: cleanBbox,
+          regions: regions && regions.length > 0 ? regions : undefined,
           subject: (r.subject || 'Physics') as QuestionSubject,
           chapter: r.chapter,
           topic: r.topic,
@@ -233,15 +258,22 @@ export async function updatePdfNativeQuestion(
   // 1. Update in local persistent storage
   await saveLocalPdfNativeQuestions([question]);
 
-  // 2. Update in Supabase
+  // 2. Update in Supabase (authoritative source of truth)
   try {
     const nowIso = new Date().toISOString();
+    const bboxWithRegions = {
+      x: question.bbox.x,
+      y: question.bbox.y,
+      width: question.bbox.width,
+      height: question.bbox.height,
+      ...(question.regions && question.regions.length > 0 ? { regions: question.regions } : {}),
+    };
+
     const row: Partial<PdfNativeQuestionRow> = {
       question_number: question.question_number,
       page_start: question.page_start,
       page_end: question.page_end,
-      bbox: question.bbox,
-      regions: question.regions,
+      bbox: bboxWithRegions,
       subject: question.subject,
       chapter: question.chapter ?? null,
       topic: question.topic ?? null,
@@ -255,7 +287,8 @@ export async function updatePdfNativeQuestion(
 
     await updateRows('pdf_native_questions', row, { id: `eq.${question.id}` });
   } catch (err) {
-    console.warn('[updatePdfNativeQuestion] Remote Supabase update skipped (saved locally):', err);
+    console.error('[updatePdfNativeQuestion] Remote Supabase update failed:', err);
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
   }
 
   return { success: true };

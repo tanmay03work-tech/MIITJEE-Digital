@@ -246,14 +246,29 @@ export async function getPdfNativeSetQuestions(setId: string): Promise<PdfNative
       localQList.forEach((q) => qMap.set(q.id, q));
 
       qRows.forEach((q) => {
+        const rawBbox = q.bbox as any;
+        const regions = Array.isArray(rawBbox?.regions)
+          ? rawBbox.regions
+          : Array.isArray((q as any).regions)
+          ? (q as any).regions
+          : undefined;
+
+        const cleanBbox = {
+          x: Number(rawBbox?.x ?? 0),
+          y: Number(rawBbox?.y ?? 0),
+          width: Number(rawBbox?.width ?? 0),
+          height: Number(rawBbox?.height ?? 0),
+        };
+
         qMap.set(q.id, {
           id: q.id,
           pdf_id: q.pdf_id,
           pdf_url: q.pdf_url,
           question_number: q.question_number,
-          page_start: q.page_start,
-          page_end: q.page_end,
-          bbox: q.bbox,
+          page_start: Number(q.page_start) || 1,
+          page_end: Number(q.page_end) || Number(q.page_start) || 1,
+          bbox: cleanBbox,
+          regions: regions && regions.length > 0 ? regions : undefined,
           subject: (q.subject || 'Physics') as any,
           chapter: q.chapter,
           topic: q.topic,
