@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AppState, AppStateStatus, BackHandler, FlatList, Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Flag, LayoutGrid, Timer, X } from 'lucide-react-native';
+import { Flag, LayoutGrid, Timer, X, AlertCircle } from 'lucide-react-native';
 import Animated, { FadeInUp, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -606,21 +606,49 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
   const currentQuestionPrompt = currentQuestion ? formatExamTextForDisplay(currentQuestion.prompt) : '';
   const questionIds = useMemo(() => questions.map((question: { id: string }) => question.id), [questions]);
 
+  const isPdfExam = useMemo(() => {
+    return (
+      !!test?.isPdfNative ||
+      questions.some(
+        (q) =>
+          !!q.pdfNativeBbox ||
+          (!!q.pdfNativeRegions && q.pdfNativeRegions.length > 0) ||
+          !!q.pdfUrl ||
+          !!q.pdfId
+      )
+    );
+  }, [test?.isPdfNative, questions]);
+
   // Stable memoized question object for PDF-Native rendering
   const pdfNativeQuestion = useMemo<PdfNativeQuestion | null>(() => {
-    if (!currentQuestion?.pdfNativeBbox && (!currentQuestion?.pdfNativeRegions || currentQuestion.pdfNativeRegions.length === 0)) return null;
+    if (!currentQuestion) return null;
+    const isPdf =
+      isPdfExam ||
+      !!currentQuestion.pdfNativeBbox ||
+      (!!currentQuestion.pdfNativeRegions && currentQuestion.pdfNativeRegions.length > 0) ||
+      !!currentQuestion.pdfUrl ||
+      !!currentQuestion.pdfId;
+
+    if (!isPdf) return null;
+
+    const rawBbox =
+      currentQuestion.pdfNativeBbox ||
+      currentQuestion.pdfNativeRegions?.[0]?.bbox ||
+      { x: 0, y: 0, width: 300, height: 150 };
+
     return {
       id: currentQuestion.id,
-      pdf_id: currentQuestion.pdfId || 'ref',
-      pdf_url: currentQuestion.pdfUrl,
+      pdf_id: currentQuestion.pdfId || test?.pdfId || 'ref',
+      pdf_url: currentQuestion.pdfUrl || (test as any)?.pdfUrl || '',
       question_number: String(currentIndex + 1),
       page_start: currentQuestion.pdfNativePage || 1,
-      page_end: currentQuestion.pdfNativeRegions && currentQuestion.pdfNativeRegions.length > 0
-        ? currentQuestion.pdfNativeRegions[currentQuestion.pdfNativeRegions.length - 1]!.pageNumber
-        : currentQuestion.pdfNativePage || 1,
-      bbox: currentQuestion.pdfNativeBbox || currentQuestion.pdfNativeRegions?.[0]?.bbox || { x: 0, y: 0, width: 100, height: 100 },
+      page_end:
+        currentQuestion.pdfNativeRegions && currentQuestion.pdfNativeRegions.length > 0
+          ? currentQuestion.pdfNativeRegions[currentQuestion.pdfNativeRegions.length - 1]!.pageNumber
+          : currentQuestion.pdfNativePage || 1,
+      bbox: rawBbox,
       regions: currentQuestion.pdfNativeRegions,
-      subject: (currentQuestion.subjectLabel || 'Physics') as any,
+      subject: (currentQuestion.subjectLabel || test?.subject || 'Physics') as any,
       question_type: currentQuestion.type === 'integer' ? 'INTEGER' : 'MCQ',
       correct_answer: null,
       marks: 4,
@@ -628,18 +656,11 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
       review_status: 'APPROVED',
     };
   }, [
-    currentQuestion?.id,
-    currentQuestion?.pdfNativeBbox?.x,
-    currentQuestion?.pdfNativeBbox?.y,
-    currentQuestion?.pdfNativeBbox?.width,
-    currentQuestion?.pdfNativeBbox?.height,
-    currentQuestion?.pdfNativeRegions,
-    currentQuestion?.pdfId,
-    currentQuestion?.pdfUrl,
-    currentQuestion?.pdfNativePage,
-    currentQuestion?.subjectLabel,
-    currentQuestion?.type,
+    currentQuestion,
     currentIndex,
+    isPdfExam,
+    test?.pdfId,
+    test?.subject,
   ]);
 
   const handleTogglePalette = useCallback(() => {
@@ -702,6 +723,13 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
       return null;
     }
 
+    const isPdfQuestion =
+      isPdfExam ||
+      !!currentQuestion.pdfNativeBbox ||
+      (!!currentQuestion.pdfNativeRegions && currentQuestion.pdfNativeRegions.length > 0) ||
+      !!currentQuestion.pdfUrl ||
+      !!currentQuestion.pdfId;
+
     return (
       <Card style={styles.questionCard}>
         <View style={styles.questionHeader}>
@@ -728,19 +756,30 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
           <Text style={styles.questionMeta}>{unansweredCount} left unanswered</Text>
         </View>
 
-        {pdfNativeQuestion ? (
+        {isPdfQuestion ? (
+          /* ============= PDF-NATIVE EXAM (ONLY ORIGINAL PDF REGION) ============= */
           <View style={styles.pdfNativeSection}>
             {/* 1. Original PDF Region View (Immutable Visual Source of Truth) */}
             <View style={styles.pdfFrame}>
-              <PdfNativePreview
-                pdfDoc={pdfDoc}
-                pdfUrl={currentQuestion.pdfUrl || pdfNativeQuestion.pdf_url}
-                question={pdfNativeQuestion}
-                showAdminDebug={false}
-              />
+              {pdfNativeQuestion ? (
+                <PdfNativePreview
+                  pdfDoc={pdfDoc}
+                  pdfUrl={currentQuestion.pdfUrl || pdfNativeQuestion.pdf_url || (test as any)?.pdfUrl}
+                  question={pdfNativeQuestion}
+                  showAdminDebug={false}
+                />
+              ) : (
+                <View style={styles.pdfNativeErrorCard}>
+                  <AlertCircle size={28} color="#DC2626" />
+                  <Text style={styles.pdfNativeErrorTitle}>Question Unavailable</Text>
+                  <Text style={styles.pdfNativeErrorSub}>
+                    Original PDF region could not be loaded. Please contact the administrator.
+                  </Text>
+                </View>
+              )}
             </View>
 
-            {/* 2. Minimal Answer Selection Interaction Strip */}
+            {/* 2. Answer Selection Interaction (A, B, C, D or Numeric Input) */}
             {currentQuestion.type === 'integer' ? (
               <View style={styles.integerCard}>
                 <View style={styles.integerHeaderRow}>
@@ -796,84 +835,86 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
             )}
           </View>
         ) : (
-            /* Standard CBT Rendering for non-PDF-Native tests */
-            <>
-              <Text style={styles.questionText}>{currentQuestionPrompt}</Text>
+          /* ============= STANDARD CBT QUESTION RENDERING (NON-PDF-NATIVE ONLY) ============= */
+          <>
+            <Text style={styles.questionText}>{currentQuestionPrompt}</Text>
 
-              {currentQuestion.imageUrl ? (
-                <Image source={{ uri: currentQuestion.imageUrl }} style={styles.questionImage} resizeMode="contain" />
-              ) : null}
+            {currentQuestion.imageUrl ? (
+              <Image source={{ uri: currentQuestion.imageUrl }} style={styles.questionImage} resizeMode="contain" />
+            ) : null}
 
-              {currentQuestion.type === 'integer' ? (
-                <View style={styles.integerCard}>
-                  <View style={styles.integerHeaderRow}>
-                    <Text style={styles.integerLabel}>Enter integer answer</Text>
-                    {selectedAnswer ? (
-                      <TouchableOpacity onPress={handleClearResponse} style={styles.clearMiniBtn}>
-                        <X size={13} color={colors.danger} />
-                        <Text style={styles.clearMiniText}>Clear</Text>
-                      </TouchableOpacity>
-                    ) : null}
-                  </View>
-                  <TextInput
-                    keyboardType="numeric"
-                    value={selectedAnswer ?? ''}
-                    onChangeText={handleIntegerChange}
-                    placeholder="Type your answer"
-                    placeholderTextColor={colors.textSubtle}
-                    style={styles.integerInput}
-                  />
-                </View>
-              ) : (
-                <View style={styles.optionList}>
-                  {currentQuestion.options.map((option: string, optionIndex: number) => {
-                    const badgeLetter = String.fromCharCode(65 + optionIndex);
-                    const isOptionSelected =
-                      selectedAnswer === option ||
-                      selectedAnswer === badgeLetter ||
-                      selectedAnswer === `Option ${badgeLetter}`;
-                    return (
-                      <OptionCard
-                        key={`${currentQuestion.id}_${optionIndex}`}
-                        badgeLabel={badgeLetter}
-                        label={option}
-                        selected={isOptionSelected}
-                        onPress={() => handleSelectAnswer(option)}
-                        imageUrl={currentQuestion.optionImageUrls?.[optionIndex]}
-                      />
-                    );
-                  })}
+            {currentQuestion.type === 'integer' ? (
+              <View style={styles.integerCard}>
+                <View style={styles.integerHeaderRow}>
+                  <Text style={styles.integerLabel}>Enter integer answer</Text>
                   {selectedAnswer ? (
-                    <TouchableOpacity
-                      style={styles.clearResponseInlineBtn}
-                      onPress={handleClearResponse}
-                      activeOpacity={0.7}
-                    >
-                      <X size={14} color={colors.danger} />
-                      <Text style={styles.clearResponseInlineText}>Unselect / Clear Response</Text>
+                    <TouchableOpacity onPress={handleClearResponse} style={styles.clearMiniBtn}>
+                      <X size={13} color={colors.danger} />
+                      <Text style={styles.clearMiniText}>Clear</Text>
                     </TouchableOpacity>
                   ) : null}
                 </View>
-              )}
-            </>
-          )}
-        </Card>
+                <TextInput
+                  keyboardType="numeric"
+                  value={selectedAnswer ?? ''}
+                  onChangeText={handleIntegerChange}
+                  placeholder="Type your answer"
+                  placeholderTextColor={colors.textSubtle}
+                  style={styles.integerInput}
+                />
+              </View>
+            ) : (
+              <View style={styles.optionList}>
+                {currentQuestion.options.map((option: string, optionIndex: number) => {
+                  const badgeLetter = String.fromCharCode(65 + optionIndex);
+                  const isOptionSelected =
+                    selectedAnswer === option ||
+                    selectedAnswer === badgeLetter ||
+                    selectedAnswer === `Option ${badgeLetter}`;
+                  return (
+                    <OptionCard
+                      key={`${currentQuestion.id}_${optionIndex}`}
+                      badgeLabel={badgeLetter}
+                      label={option}
+                      selected={isOptionSelected}
+                      onPress={() => handleSelectAnswer(option)}
+                      imageUrl={currentQuestion.optionImageUrls?.[optionIndex]}
+                    />
+                  );
+                })}
+                {selectedAnswer ? (
+                  <TouchableOpacity
+                    style={styles.clearResponseInlineBtn}
+                    onPress={handleClearResponse}
+                    activeOpacity={0.7}
+                  >
+                    <X size={14} color={colors.danger} />
+                    <Text style={styles.clearResponseInlineText}>Unselect / Clear Response</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            )}
+          </>
+        )}
+      </Card>
     );
   }, [
-    currentIndex,
     currentQuestion,
-    currentQuestionPrompt,
     currentSubjectLabel,
+    isSubjectSectionTagged,
+    isFlagged,
+    handleToggleFlag,
+    currentIndex,
+    unansweredCount,
+    isPdfExam,
+    pdfNativeQuestion,
+    pdfDoc,
+    test,
+    selectedAnswer,
     handleClearResponse,
     handleIntegerChange,
     handleSelectAnswer,
-    handleToggleFlag,
-    isFlagged,
-    isSubjectSectionTagged,
-    pdfDoc,
-    pdfNativeQuestion,
-    selectedAnswer,
-    unansweredCount,
+    currentQuestionPrompt,
   ]);
 
   if (sessionError) {
@@ -1414,5 +1455,28 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: colors.danger,
+  },
+  pdfNativeErrorCard: {
+    padding: spacing.xl,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: 8,
+    marginVertical: spacing.md,
+    gap: spacing.xs,
+  },
+  pdfNativeErrorTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#991B1B',
+    marginTop: spacing.xs,
+  },
+  pdfNativeErrorSub: {
+    fontSize: 13,
+    color: '#B91C1C',
+    textAlign: 'center',
+    maxWidth: 360,
   },
 });

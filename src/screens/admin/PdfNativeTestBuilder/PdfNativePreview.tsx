@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View, Image, Platform, TouchableOpacity, Alert } from 'react-native';
-import { UploadCloud, FileText, RefreshCw } from 'lucide-react-native';
+import { UploadCloud, FileText, RefreshCw, AlertCircle } from 'lucide-react-native';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PdfNativeQuestion } from '../../../services/pdf-native/pdfNativeTypes';
 import { renderPdfQuestionCompositeToCanvas } from '../../../services/pdf-native/pdfRegionRenderer';
@@ -272,9 +272,12 @@ export function PdfNativePreviewComponent({
               </TouchableOpacity>
             </View>
           ) : (
-            <View style={styles.loadingWrap}>
-              <ActivityIndicator size="small" color={colors.primary} />
-              <Text style={styles.loadingText}>Loading question visual...</Text>
+            <View style={styles.studentErrorWrap}>
+              <AlertCircle size={28} color="#DC2626" />
+              <Text style={styles.studentErrorTitle}>Question Unavailable</Text>
+              <Text style={styles.studentErrorSub}>
+                Original PDF region could not be loaded. Please contact the administrator.
+              </Text>
             </View>
           )
         ) : dataUrl ? (
@@ -418,6 +421,31 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: 12,
     fontWeight: '700',
+  },
+  studentErrorWrap: {
+    padding: spacing.xl,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: radius.md,
+    marginVertical: spacing.md,
+    gap: spacing.xs,
+    width: '90%',
+    alignSelf: 'center',
+  },
+  studentErrorTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#991B1B',
+    marginTop: spacing.xs,
+  },
+  studentErrorSub: {
+    fontSize: 13,
+    color: '#B91C1C',
+    textAlign: 'center',
+    maxWidth: 360,
   },
   imageWrap: {
     width: '100%',

@@ -214,6 +214,17 @@ export async function fetchPdfNativeCbtQuestions(testId: string): Promise<TestQu
         questionRows = [];
       }
 
+      let setRow: any = null;
+      try {
+        const sets = await selectRows<{ id: string; pdf_id?: string; pdf_url?: string }>('pdf_native_sets', '*', {
+          id: `eq.${testId}`,
+          limit: 1,
+        });
+        if (sets && sets.length > 0) setRow = sets[0];
+      } catch {
+        // Continue
+      }
+
       const qMap = new Map<string, PdfNativeQuestion>();
       const localQList = await getLocalPdfNativeQuestions();
       localQList.forEach((q) => qMap.set(q.id, q));
@@ -235,8 +246,8 @@ export async function fetchPdfNativeCbtQuestions(testId: string): Promise<TestQu
 
         qMap.set(q.id, {
           id: q.id,
-          pdf_id: q.pdf_id,
-          pdf_url: q.pdf_url,
+          pdf_id: q.pdf_id || setRow?.pdf_id || 'ref',
+          pdf_url: q.pdf_url || setRow?.pdf_url,
           question_number: q.question_number,
           page_start: Number(q.page_start) || 1,
           page_end: Number(q.page_end) || Number(q.page_start) || 1,
