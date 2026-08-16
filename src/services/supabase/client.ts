@@ -5,7 +5,7 @@ import { appEnv, assertBackendConfig } from '../../config/env';
 import { logError, logWarn } from '../../utils/logger';
 import { SupabaseSession } from './types';
 
-type HttpMethod = 'GET' | 'POST' | 'PATCH';
+type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 
 let currentSession: SupabaseSession | null = null;
 const PKCE_VERIFIER_KEY = 'miitjee:auth:pkce_verifier';
@@ -423,6 +423,7 @@ async function request<T>(path: string, options?: {
       }
 
       if (isAuthFailure) {
+        const expiredUserId = authSession?.user?.id;
         await setCurrentSession(null);
         throw new Error('Your session has expired. Please sign in again.');
       }
@@ -647,6 +648,50 @@ export async function insertRow<T>(from: string, body: unknown) {
   return rows[0];
 }
 
+export async function insertRows<T>(from: string, body: unknown[]) {
+  return request<T[]>(`/rest/v1/${from}`, {
+    method: 'POST',
+    auth: true,
+    headers: {
+      Prefer: 'return=representation',
+    },
+    body,
+  });
+}
+
+export async function upsertRows<T>(from: string, body: unknown, onConflict?: string) {
+  const query = onConflict ? { on_conflict: onConflict } : undefined;
+  return request<T[]>(`/rest/v1/${from}`, {
+    method: 'POST',
+    auth: true,
+    headers: {
+      Prefer: 'resolution=merge-duplicates,return=representation',
+    },
+    query,
+    body,
+  });
+}
+
+export async function deleteRows(from: string, query?: Record<string, string | number | boolean | undefined>) {
+  return request<void>(`/rest/v1/${from}`, {
+    method: 'DELETE',
+    auth: true,
+    query,
+  });
+}
+
+export async function updateRows<T>(from: string, body: unknown, query?: Record<string, string | number | boolean | undefined>) {
+  return request<T[]>(`/rest/v1/${from}`, {
+    method: 'PATCH',
+    auth: true,
+    headers: {
+      Prefer: 'return=representation',
+    },
+    body,
+    query,
+  });
+}
+
 export async function rpc<T>(name: string, body?: Record<string, unknown>, options?: { retryable?: boolean; timeoutMs?: number }) {
   return request<T>(`/rest/v1/rpc/${name}`, {
     method: 'POST',
@@ -778,7 +823,14 @@ function encodeStorageObjectPath(value: string) {
 }
 
 function normalizeLocalUri(uri: string) {
-  if (uri.startsWith('content://') || uri.startsWith('file://') || uri.startsWith('http://') || uri.startsWith('https://')) {
+  if (
+    uri.startsWith('blob:') ||
+    uri.startsWith('data:') ||
+    uri.startsWith('content://') ||
+    uri.startsWith('file://') ||
+    uri.startsWith('http://') ||
+    uri.startsWith('https://')
+  ) {
     return uri;
   }
 
@@ -791,6 +843,7 @@ export async function uploadFileToStorage(params: {
   uri: string;
   name?: string;
   mimeType?: string;
+  file?: Blob | File;
 }) {
   assertBackendConfig();
   const session = await ensureAuthenticatedSession();
@@ -829,6 +882,9 @@ export async function uploadFileToStorage(params: {
       type: params.mimeType ?? 'application/octet-stream',
     } as never);
     requestBody = formData;
+  } else if (params.file) {
+    requestBody = params.file;
+    requestHeaders['Content-Type'] = params.mimeType ?? params.file.type ?? 'application/octet-stream';
   } else {
     const fileResponse = await fetch(normalizedUri);
     if (!fileResponse.ok) {

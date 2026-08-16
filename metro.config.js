@@ -1,17 +1,15 @@
+const path = require('path');
+const { FileStore } = require('metro-cache');
 const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
-/**
- * Metro configuration
- * https://reactnative.dev/docs/metro
- *
- * @type {import('@react-native/metro-config').MetroConfig}
- */
+
 const escapeForRegex = (value) => value.replace(/[|\\{}()[\]^$+*?.]/g, '\\$&');
 const root = escapeForRegex(__dirname);
 const sep = '(?:\\\\|\\/)';
 
 const config = {
-  maxWorkers: 1,
-  stickyWorkers: false,
+  cacheStores: [
+    new FileStore({ root: path.join(__dirname, '.metro-cache') }),
+  ],
   resolver: {
     blockList: [
       new RegExp(`${root}${sep}node_modules_old${sep}.*`),

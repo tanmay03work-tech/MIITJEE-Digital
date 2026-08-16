@@ -3,6 +3,7 @@ import { Image, StyleSheet, Text, View } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { ArrowRight, Sparkles } from 'lucide-react-native';
 
+import miitjeeLogo from '../../assets/branding/miitjee-logo.png';
 import { AnimatedPressable } from '../common/AnimatedPressable';
 import { colors, radius, shadows, spacing } from '../../theme';
 
@@ -24,7 +25,7 @@ export function ScholarshipHero({ onPress }: ScholarshipHeroProps) {
         </View>
       </View>
       <View style={styles.brandPlate}>
-        <Image source={require('../../assets/branding/miitjee-logo.png')} style={styles.brandImage} resizeMode="contain" />
+        <Image source={miitjeeLogo} style={styles.brandImage} resizeMode="contain" />
       </View>
       <Text style={styles.title}>Earn up to 100% scholarship through our national challenge</Text>
       <Text style={styles.subtitle}>

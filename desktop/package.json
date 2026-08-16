@@ -1,0 +1,46 @@
+{
+  "name": "miitjee-cbt-desktop",
+  "version": "1.0.0",
+  "description": "MIITJEE Classes Windows Desktop CBT Exam Application",
+  "author": "MIITJEE Classes",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:win": "electron-builder --win nsis"
+  },
+  "dependencies": {
+    "electron-is-dev": "^3.0.1",
+    "pdfjs-dist": "^3.11.174"
+  },
+  "devDependencies": {
+    "electron": "^34.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.miitjee.cbt.desktop",
+    "productName": "MIITJEE-CBT-Exam",
+    "copyright": "Copyright © 2026 MIITJEE Classes",
+    "directories": {
+      "output": "../dist-electron"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      {
+        "from": "../dist",
+        "to": "dist",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

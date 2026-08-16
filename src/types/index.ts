@@ -70,6 +70,27 @@ export interface TestItem {
   startedAt?: string | null;
   scholarshipAdmissionClass?: ScholarshipAdmissionClass;
   scholarshipTargetExam?: ScholarshipTargetExam;
+  shareCode?: string;
+  isOpenForAll?: boolean;
+  isLinkRevoked?: boolean;
+  linkExpiresAt?: string | null;
+  accessMode?: 'OPEN_FOR_ALL' | 'RESTRICTED_BATCH';
+  allowedBatches?: string[];
+  startsAt?: string | null;
+  endsAt?: string | null;
+  correctMarks?: number;
+  wrongMarks?: number;
+  unattemptedMarks?: number;
+  isPdfNative?: boolean;
+  pdfId?: string;
+}
+
+export type ExamLinkStatus = 'VALID' | 'INVALID' | 'REVOKED' | 'EXPIRED' | 'BATCH_RESTRICTED';
+
+export interface ExamLinkResolution {
+  status: ExamLinkStatus;
+  message: string;
+  test?: TestItem;
 }
 
 export interface TestQuestion {
@@ -82,19 +103,35 @@ export interface TestQuestion {
   integerAnswer?: number;
   explanation: string;
   imageUrl?: string | null;
+  optionImageUrls?: string[];
+  sourcePage?: number;
+  sourceRegion?: string | null;
   subjectLabel?: string;
+  aiConfidence?: number;
+  needsReview?: boolean;
+  hasAnswerKeyMatch?: boolean;
+  pdfNativeBbox?: { x: number; y: number; width: number; height: number };
+  pdfNativeRegions?: import('../services/pdf-native/pdfNativeTypes').PdfNativeRegion[];
+  pdfNativePage?: number;
+  pdfId?: string;
+  pdfUrl?: string;
+  nativeStructure?: import('../services/pdf-native/nativeQuestionTypes').NativeQuestionStructure;
 }
 
 export interface TestResult {
   id: string;
   testId: string;
   userId: string;
+  studentName?: string;
   score: number;
   correctAnswers: number;
+  wrongAnswers?: number;
+  unattempted?: number;
   totalQuestions: number;
   rank: number;
   percentile: number;
   submittedAt: string;
+  isPdfNative?: boolean;
 }
 
 export interface TestAttemptReviewItem {
@@ -106,6 +143,7 @@ export interface TestAttemptReviewItem {
   userAnswer: string;
   correctAnswer: string;
   isCorrect: boolean;
+  isUnattempted?: boolean;
   explanation: string;
   imageUrl?: string | null;
 }
@@ -238,7 +276,13 @@ export interface CreateTestQuestionPayload {
   integerAnswer?: number;
   explanation: string;
   imageUrl?: string | null;
+  optionImageUrls?: string[];
+  sourcePage?: number;
+  sourceRegion?: string | null;
   subjectLabel?: string;
+  aiConfidence?: number;
+  needsReview?: boolean;
+  hasAnswerKeyMatch?: boolean;
 }
 
 export interface CreateTestPayload {
@@ -249,6 +293,7 @@ export interface CreateTestPayload {
   batchId?: string;
   type: TestType;
   subject: string;
+  isOpenForAll?: boolean;
   scholarshipAdmissionClass?: ScholarshipAdmissionClass;
   scholarshipTargetExam?: ScholarshipTargetExam;
   questions: CreateTestQuestionPayload[];
@@ -263,6 +308,7 @@ export interface UpdateTestPayload {
   batchId?: string;
   type: TestType;
   subject: string;
+  isOpenForAll?: boolean;
   scholarshipAdmissionClass?: ScholarshipAdmissionClass;
   scholarshipTargetExam?: ScholarshipTargetExam;
 }
@@ -271,6 +317,7 @@ export interface SubmitAttemptPayload {
   testId: string;
   userId: string;
   answers: Record<string, string>;
+  studentName?: string;
 }
 
 export interface SubmittedTestResponse {
@@ -282,6 +329,7 @@ export interface SubmittedTestResponse {
 
 export interface PdfImportPayload {
   pdfUrl: string;
+  answerKeyPdfUrl?: string;
   testTitle?: string;
   subject?: string;
   startQuestionNumber?: number;
@@ -312,13 +360,20 @@ export interface QuestionBankSet {
 }
 
 export interface QuestionBankQuestion {
-  id: number;
+  id: number | string;
   setId: number;
   question: string;
   options: string[];
   type: QuestionType;
   imageUrl?: string | null;
   correctAnswer: string;
+  explanation?: string;
+  aiConfidence?: number;
+  needsReview?: boolean;
+  hasAnswerKeyMatch?: boolean;
+  optionImageUrls?: string[];
+  sourcePage?: number;
+  sourceRegion?: string | null;
 }
 
 export interface AssignBatchPayload {
@@ -406,4 +461,19 @@ export interface SignUpPayload {
   email: string;
   password: string;
   requestedRole: 'student' | 'admin';
+}
+
+export type ActivityLogCategory = 'auth' | 'exam' | 'admin_action';
+export type ActivityLogStatus = 'success' | 'failed' | 'warning' | 'info';
+
+export interface ActivityLogEntry {
+  id: string;
+  userId?: string;
+  studentName?: string;
+  category: ActivityLogCategory;
+  eventType: string;
+  status: ActivityLogStatus;
+  deviceInfo?: string;
+  details?: Record<string, unknown>;
+  createdAt: string;
 }

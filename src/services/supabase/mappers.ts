@@ -1,4 +1,5 @@
 import {
+  ActivityLogEntry,
   AnalyticsSnapshot,
   AutoSubmitEvent,
   AppUser,
@@ -24,6 +25,7 @@ import { appEnv } from '../../config/env';
 import { normalizeExamText } from '../../utils/examText';
 import { coerceDurationMinutes } from '../../utils/formatters';
 import {
+  ActivityLogRow,
   AnalyticsRow,
   AutoSubmitEventRow,
   BatchRow,
@@ -48,20 +50,48 @@ import {
   ViolationSummaryRow,
 } from './types';
 
-function normalizeAssetUrl(value?: string | null) {
-  if (!value) {
-    return undefined;
+export function normalizeAssetUrl(value?: string | null): string | null {
+  if (!value || typeof value !== 'string' || !value.trim()) {
+    return null;
   }
 
-  if (value.startsWith('http://') || value.startsWith('https://')) {
-    return value;
+  let url = value.trim();
+  const fallbackWorkerBase = 'https://miitjee-backend.miitjee-api.workers.dev';
+  const isFileProtocol = typeof window !== 'undefined' && window.location.protocol === 'file:';
+  const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
+  const effectiveWorkerBase = (appEnv.workerBaseUrl && (!isFileProtocol || !appEnv.workerBaseUrl.includes('127.0.0.1')))
+    ? appEnv.workerBaseUrl
+    : fallbackWorkerBase;
+
+  // 1. Replace legacy localhost / 127.0.0.1 worker base URLs with effective live worker Base URL when not in local dev
+  if (isFileProtocol || !isLocalHost) {
+    url = url.replace(/^https?:\/\/(?:127\.0\.0\.1|localhost)(?::8787)?/i, effectiveWorkerBase);
+  } else {
+    url = url.replace(/^https?:\/\/(?:127\.0\.0\.1|localhost)(?::8787)?/i, appEnv.workerBaseUrl || fallbackWorkerBase);
   }
 
-  if (value.startsWith('/storage/v1/')) {
-    return `${appEnv.supabaseUrl}${value}`;
+  // 2. Full HTTPS / HTTP URL after replacement
+  if (url.startsWith('https://') || url.startsWith('http://') || url.startsWith('data:image/')) {
+    if (typeof window !== 'undefined' && window.location.protocol === 'https:' && url.startsWith('http://')) {
+      url = url.replace(/^http:\/\//i, 'https://');
+    }
+    return url;
   }
 
-  const cleaned = value.replace(/^\/+/, '');
+  // 3. Relative worker API routes
+  if (url.startsWith('/api/') || url.startsWith('api/')) {
+    const cleanPath = url.startsWith('/') ? url : `/${url}`;
+    return `${effectiveWorkerBase.replace(/\/$/, '')}${cleanPath}`;
+  }
+
+  // 4. Supabase Storage relative paths
+  if (url.startsWith('/storage/v1/')) {
+    return `${appEnv.supabaseUrl}${url}`;
+  }
+
+  // 5. Default fallback to Supabase exam-assets bucket
+  const cleaned = url.replace(/^\/+/, '');
   return `${appEnv.supabaseUrl}/storage/v1/object/public/exam-assets/${cleaned}`;
 }
 
@@ -118,6 +148,13 @@ export function mapEnquiry(row: EnquiryRow): EnquiryRecord {
 }
 
 export function mapTest(row: TestRow): TestItem {
+  const isOpen =
+    Boolean(row.is_open_for_all) ||
+    !row.batch_id ||
+    row.batch_id === 'ALL' ||
+    row.batch_id.toLowerCase() === 'all batches' ||
+    row.batch_id.toLowerCase() === 'all';
+
   return {
     id: row.id,
     title: row.title,
@@ -133,6 +170,11 @@ export function mapTest(row: TestRow): TestItem {
     startedAt: row.started_at ?? undefined,
     scholarshipAdmissionClass: row.scholarship_admission_class ?? undefined,
     scholarshipTargetExam: row.scholarship_target_exam ?? undefined,
+    shareCode: row.share_code ?? undefined,
+    isOpenForAll: isOpen,
+    isLinkRevoked: row.is_link_revoked ?? false,
+    linkExpiresAt: row.link_expires_at ?? null,
+    accessMode: isOpen ? 'OPEN_FOR_ALL' : 'RESTRICTED_BATCH',
   };
 }
 
@@ -147,19 +189,30 @@ export function mapQuestion(row: TestQuestionRow): TestQuestion {
     integerAnswer: row.integer_answer ?? undefined,
     explanation: row.explanation,
     imageUrl: normalizeAssetUrl(row.image_url),
+    optionImageUrls: Array.isArray(row.option_image_urls)
+      ? row.option_image_urls.map((url) => normalizeAssetUrl(url) || url)
+      : undefined,
+    sourcePage: row.source_page ?? undefined,
+    sourceRegion: row.source_region ?? undefined,
     subjectLabel: row.subject_label ?? undefined,
   };
 }
 
 export function mapResult(row: ResultRow): TestResult {
+  const wrongAnswers = row.wrong_answers ?? 0;
+  const unattempted = row.unattempted ?? Math.max(0, row.total_questions - row.correct_answers - wrongAnswers);
+
   return {
-    id: row.id,
+    id: row.id || row.result_id || row.attempt_id || '',
     testId: row.test_id,
     userId: row.user_id,
+    studentName: row.student_name || undefined,
     score: row.score,
     correctAnswers: row.correct_answers,
+    wrongAnswers,
+    unattempted,
     totalQuestions: row.total_questions,
-    rank: row.rank,
+    rank: row.rank ?? 1,
     percentile: row.percentile,
     submittedAt: row.submitted_at,
   };
@@ -202,6 +255,9 @@ export function mapSubmittedAttempt(response: SubmitAttemptRpcResponse): Submitt
 }
 
 export function mapReviewRow(row: ReviewRow): TestAttemptReviewItem {
+  const ans = (row.user_answer || '').trim();
+  const isUnattempted = row.is_unattempted ?? (ans === '');
+
   return {
     questionId: row.question_id,
     testId: row.test_id,
@@ -210,7 +266,8 @@ export function mapReviewRow(row: ReviewRow): TestAttemptReviewItem {
     options: row.options,
     userAnswer: row.user_answer,
     correctAnswer: row.correct_answer,
-    isCorrect: row.is_correct,
+    isCorrect: isUnattempted ? false : row.is_correct,
+    isUnattempted,
     explanation: row.explanation,
     imageUrl: normalizeAssetUrl(row.image_url),
   };
@@ -372,3 +429,18 @@ export function mapPdfImportQuestion(question: PdfImportResponse['questions'][nu
     imageUrl: question.image,
   };
 }
+
+export function mapActivityLog(row: ActivityLogRow): ActivityLogEntry {
+  return {
+    id: row.id,
+    userId: row.user_id ?? undefined,
+    studentName: row.student_name ?? undefined,
+    category: row.category as ActivityLogEntry['category'],
+    eventType: row.event_type,
+    status: row.status as ActivityLogEntry['status'],
+    deviceInfo: row.device_info ?? undefined,
+    details: row.details ?? undefined,
+    createdAt: row.created_at,
+  };
+}
+

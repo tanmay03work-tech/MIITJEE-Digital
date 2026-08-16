@@ -10,6 +10,7 @@ import { AnimatedPressable } from '../../components/common/AnimatedPressable';
 import { InputField } from '../../components/common/InputField';
 import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
+import { useTestSessionStore } from '../../store/testSessionStore';
 import { useLoader } from '../../providers/GlobalLoaderProvider';
 import { colors, radius, spacing } from '../../theme';
 import { RootStackScreenProps } from '../../navigation/types';
@@ -21,8 +22,10 @@ import {
   scholarshipTargetLabels,
   scholarshipTargetOptions,
 } from '../../constants/scholarship';
-import { ScholarshipAdmissionClass, ScholarshipTargetExam } from '../../types';
+import { ScholarshipAdmissionClass, ScholarshipTargetExam, TestResult } from '../../types';
+import { updateRows } from '../../services/supabase/client';
 import { getTestLockedMessage, getTestStatusLabel, isTestActive } from '../../utils/testAvailability';
+import { fetchExistingAttemptForTest } from '../../services/api/tests';
 
 export function TestIntroScreen({ route, navigation }: RootStackScreenProps<'TestIntro'>) {
   const { testId } = route.params;
@@ -49,6 +52,37 @@ export function TestIntroScreen({ route, navigation }: RootStackScreenProps<'Tes
   const [scholarshipTargetExam, setScholarshipTargetExam] = useState<ScholarshipTargetExam>(
     test?.scholarshipTargetExam ?? 'boards',
   );
+  const [showNameModal, setShowNameModal] = useState(false);
+  const [promptName, setPromptName] = useState(user?.fullName ?? '');
+
+  const handleSaveNameAndStart = async () => {
+    const trimmedName = promptName.trim();
+    if (!trimmedName) {
+      Alert.alert('Name Required', 'Please enter your full name to start the exam.');
+      return;
+    }
+
+    try {
+      showLoader({ title: 'Preparing Exam', subtitle: 'Saving your student name...' });
+      if (user?.id) {
+        void updateRows('profiles', { full_name: trimmedName }, { id: `eq.${user.id}` }).catch(() => undefined);
+        useAuthStore.getState().setUser({ ...user, fullName: trimmedName });
+      }
+      useTestSessionStore.getState().setStudentName(trimmedName);
+      setShowNameModal(false);
+      if (test) {
+        navigation.navigate('TestAttempt', { testId: test.id, studentName: trimmedName });
+      }
+    } catch {
+      if (test) {
+        useTestSessionStore.getState().setStudentName(trimmedName);
+        setShowNameModal(false);
+        navigation.navigate('TestAttempt', { testId: test.id, studentName: trimmedName });
+      }
+    } finally {
+      hideLoader();
+    }
+  };
 
   if (!test && isBootstrapping) {
     return (
@@ -72,11 +106,35 @@ export function TestIntroScreen({ route, navigation }: RootStackScreenProps<'Tes
   const statusLabel = getTestStatusLabel(test);
   const batchCards = useMemo(() => batches.slice(0, 6), [batches]);
   const cachedExistingAttempt = results.find((entry) => entry.userId === user?.id && entry.testId === test.id);
-  const [existingAttempt, setExistingAttempt] = useState(cachedExistingAttempt);
+  const [existingAttempt, setExistingAttempt] = useState<TestResult | null | undefined>(cachedExistingAttempt);
 
   useEffect(() => {
-    setExistingAttempt(cachedExistingAttempt);
-  }, [cachedExistingAttempt?.id]);
+    let isMounted = true;
+    if (test?.id) {
+      fetchExistingAttemptForTest(test.id, user?.id)
+        .then((attempt) => {
+          if (isMounted) {
+            setExistingAttempt(attempt);
+            if (!attempt) {
+              // If attempt was deleted in Supabase, purge from app store results
+              useAppStore.setState((prev) => ({
+                results: prev.results.filter(
+                  (r) => !(r.testId === test.id && (user?.id ? r.userId === user.id : true)),
+                ),
+              }));
+            }
+          }
+        })
+        .catch(() => {
+          if (isMounted) {
+            setExistingAttempt(cachedExistingAttempt);
+          }
+        });
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [test?.id, user?.id, cachedExistingAttempt?.id]);
 
   const handleEnrollmentSubmit = async () => {
     if (!enrollmentBatchId || !phone.trim() || !message.trim()) {
@@ -167,7 +225,8 @@ export function TestIntroScreen({ route, navigation }: RootStackScreenProps<'Tes
         targetExam: scholarshipTargetExam,
       });
 
-      navigation.navigate('TestAttempt', { testId: resolvedScholarshipTest.id });
+      useTestSessionStore.getState().setStudentName(scholarshipFullName.trim());
+      navigation.navigate('TestAttempt', { testId: resolvedScholarshipTest.id, studentName: scholarshipFullName.trim() });
     } finally {
       hideLoader();
     }
@@ -183,15 +242,14 @@ export function TestIntroScreen({ route, navigation }: RootStackScreenProps<'Tes
           <Badge label={statusLabel} tone={testActive ? 'success' : 'warning'} />
         </View>
         <Text style={styles.description}>{test.description}</Text>
+        <Text style={styles.meta}>Subject / Stream: {test.subject || 'All Subjects'}</Text>
         <Text style={styles.meta}>Duration: {formatDuration(test.durationMinutes)}</Text>
-        <Text style={styles.meta}>Questions: {test.questionCount}</Text>
-        <Text style={styles.meta}>Batch: {test.batchId ?? 'Open access'}</Text>
-        {test.type === 'scholarship' && test.scholarshipAdmissionClass && test.scholarshipTargetExam ? (
-          <Text style={styles.meta}>
-            Scholarship Track: {scholarshipAdmissionLabels[test.scholarshipAdmissionClass]} | {scholarshipTargetLabels[test.scholarshipTargetExam]}
-          </Text>
-        ) : null}
-        <Text style={styles.meta}>Scheduled: {formatDateTimeLabel(test.scheduledAt)}</Text>
+        <Text style={styles.meta}>Total Questions: {test.questionCount}</Text>
+        <Text style={styles.meta}>
+          Access: {test.isOpenForAll ? 'Open for All Students' : test.allowedBatches && test.allowedBatches.length > 0 ? `Batch: ${test.allowedBatches.join(', ')}` : (test.batchId ? `Batch: ${test.batchId}` : 'Batch Restricted')}
+        </Text>
+        <Text style={styles.meta}>Starts: {formatDateTimeLabel(test.scheduledAt || test.startedAt || new Date().toISOString())}</Text>
+        {test.endsAt ? <Text style={styles.meta}>Closing Deadline: {formatDateTimeLabel(test.endsAt)}</Text> : null}
         <Text style={styles.meta}>Status: {statusLabel}</Text>
         {existingAttempt ? <Text style={styles.reason}>You have already completed this paper. Review your result below.</Text> : null}
         <Text style={styles.reason}>{!testActive && eligibility.allowed ? getTestLockedMessage(test) : eligibility.reason}</Text>
@@ -259,6 +317,19 @@ export function TestIntroScreen({ route, navigation }: RootStackScreenProps<'Tes
             <Text style={styles.startText}>Continue to Scholarship Test</Text>
           </AnimatedPressable>
         </Card>
+      ) : showNameModal ? (
+        <Card style={styles.formCard}>
+          <Text style={styles.sectionTitle}>Enter Your Name</Text>
+          <InputField
+            label="Enter your full name"
+            value={promptName}
+            onChangeText={setPromptName}
+            placeholder="Enter your full name"
+          />
+          <AnimatedPressable style={styles.startButton} onPress={() => void handleSaveNameAndStart()}>
+            <Text style={styles.startText}>Start Exam</Text>
+          </AnimatedPressable>
+        </Card>
       ) : eligibility.allowed ? (
         <AnimatedPressable
           style={styles.startButton}
@@ -267,8 +338,7 @@ export function TestIntroScreen({ route, navigation }: RootStackScreenProps<'Tes
               Alert.alert('Paper locked', getTestLockedMessage(test));
               return;
             }
-
-            navigation.navigate('TestAttempt', { testId: test.id });
+            setShowNameModal(true);
           }}>
           <Text style={styles.startText}>Enter Paper</Text>
         </AnimatedPressable>

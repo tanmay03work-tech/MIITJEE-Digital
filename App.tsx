@@ -8,6 +8,7 @@ import { AppErrorFallback } from './src/components/common/AppErrorFallback';
 import { AnimatedSplashScreen } from './src/components/common/AnimatedSplashScreen';
 import { GlobalOfflineOverlay } from './src/components/common/GlobalOfflineOverlay';
 import { InAppDialogHost } from './src/components/common/InAppDialogHost';
+import { UpdateModal } from './src/components/common/UpdateModal';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { GlobalLoaderProvider } from './src/providers/GlobalLoaderProvider';
 import { installInAppAlertInterceptor } from './src/utils/installInAppAlertInterceptor';
@@ -75,6 +76,7 @@ export default function App() {
           <GlobalLoaderProvider>
             <RootNavigator />
             <InAppDialogHost />
+            <UpdateModal />
             <GlobalOfflineOverlay />
             {showAnimatedSplash ? <AnimatedSplashScreen /> : null}
           </GlobalLoaderProvider>

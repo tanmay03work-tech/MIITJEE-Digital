@@ -1,0 +1,71 @@
+name: 🚀 MIITJEE Continuous Integration Pipeline
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+jobs:
+  lint-and-typecheck:
+    name: 🔍 Lint & TypeScript Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: 🛡️ Run TypeScript Compiler (Typecheck)
+        run: npm run lint
+
+  unit-tests:
+    name: 🧪 Run Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: 🧪 Execute Jest Unit Tests
+        run: npm test -- --passWithNoTests
+
+  backend-check:
+    name: ☁️ Cloudflare Workers Backend Verification
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+
+      - name: 📦 Install backend dependencies
+        run: |
+          cd miitjee-backend
+          npm ci
+
+      - name: 🛠️ Check Cloudflare Types Generator
+        run: |
+          cd miitjee-backend
+          npx wrangler types --env-interface Env || true

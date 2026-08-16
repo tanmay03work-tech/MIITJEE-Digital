@@ -57,53 +57,63 @@ export function ReviewAnswersScreen({ route }: RootStackScreenProps<'ReviewAnswe
         <Card>
           <Text style={styles.errorText}>{error}</Text>
         </Card>
+      ) : review.length === 0 ? (
+        <Card style={styles.reviewCard}>
+          <Text style={styles.questionText}>No review questions available for this paper.</Text>
+        </Card>
       ) : (
-        review.map((item, index) => (
-          <Card key={item.questionId} style={styles.reviewCard}>
-            <View style={styles.headerRow}>
-              <Badge label={`Q${index + 1}`} tone="neutral" />
-              <Badge label={item.isCorrect ? 'Correct' : 'Incorrect'} tone={item.isCorrect ? 'success' : 'danger'} />
-            </View>
+        review.map((item, index) => {
+          const isUnatt = item.isUnattempted || !item.userAnswer || item.userAnswer.trim() === '';
+          const badgeLabel = item.isCorrect ? 'Correct (+4 Marks)' : isUnatt ? 'Unattempted (0 Marks)' : 'Incorrect (-1 Mark)';
+          const badgeTone: 'success' | 'warning' | 'danger' = item.isCorrect ? 'success' : isUnatt ? 'warning' : 'danger';
 
-            <Text style={styles.questionText}>{item.prompt}</Text>
-
-            {item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.questionImage} resizeMode="cover" /> : null}
-
-            {item.questionType === 'mcq' ? (
-              <View style={styles.optionList}>
-                {item.options.map((option, optionIndex) => {
-                  const isUser = item.userAnswer === option;
-                  const isCorrect = item.correctAnswer === option;
-                  return (
-                    <View
-                      key={`${item.questionId}_${optionIndex}`}
-                      style={[styles.optionRow, isCorrect && styles.optionCorrect, isUser && !isCorrect && styles.optionIncorrect]}>
-                      <Text style={styles.optionText}>{option}</Text>
-                      {isCorrect ? <CheckCircle2 size={18} color={colors.accent} /> : null}
-                      {isUser && !isCorrect ? <XCircle size={18} color={colors.danger} /> : null}
-                    </View>
-                  );
-                })}
+          return (
+            <Card key={item.questionId} style={styles.reviewCard}>
+              <View style={styles.headerRow}>
+                <Badge label={`Q${index + 1}`} tone="neutral" />
+                <Badge label={badgeLabel} tone={badgeTone} />
               </View>
-            ) : (
-              <View style={styles.integerWrap}>
-                <View style={styles.answerBox}>
-                  <Text style={styles.answerLabel}>Your Answer</Text>
-                  <Text style={styles.answerValue}>{item.userAnswer || 'No answer'}</Text>
+
+              <Text style={styles.questionText}>{item.prompt}</Text>
+
+              {item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.questionImage} resizeMode="contain" /> : null}
+
+              {item.questionType === 'mcq' ? (
+                <View style={styles.optionList}>
+                  {item.options.map((option, optionIndex) => {
+                    const isUser = !isUnatt && item.userAnswer === option;
+                    const isCorrect = item.correctAnswer === option;
+                    return (
+                      <View
+                        key={`${item.questionId}_${optionIndex}`}
+                        style={[styles.optionRow, isCorrect && styles.optionCorrect, isUser && !isCorrect && styles.optionIncorrect]}>
+                        <Text style={styles.optionText}>{option}</Text>
+                        {isCorrect ? <CheckCircle2 size={18} color={colors.accent} /> : null}
+                        {isUser && !isCorrect ? <XCircle size={18} color={colors.danger} /> : null}
+                      </View>
+                    );
+                  })}
                 </View>
-                <View style={[styles.answerBox, styles.correctBox]}>
-                  <Text style={styles.answerLabel}>Correct Answer</Text>
-                  <Text style={styles.answerValue}>{item.correctAnswer}</Text>
+              ) : (
+                <View style={styles.integerWrap}>
+                  <View style={styles.answerBox}>
+                    <Text style={styles.answerLabel}>Your Answer</Text>
+                    <Text style={styles.answerValue}>{isUnatt ? 'Unattempted' : item.userAnswer}</Text>
+                  </View>
+                  <View style={[styles.answerBox, styles.correctBox]}>
+                    <Text style={styles.answerLabel}>Correct Answer</Text>
+                    <Text style={styles.answerValue}>{item.correctAnswer}</Text>
+                  </View>
                 </View>
-              </View>
-            )}
+              )}
 
             <View style={styles.explanationWrap}>
               <Text style={styles.explanationLabel}>Explanation</Text>
               <Text style={styles.helperText}>{item.explanation || 'No explanation available for this question yet.'}</Text>
             </View>
           </Card>
-        ))
+          );
+        })
       )}
     </Screen>
   );
@@ -130,7 +140,8 @@ const styles = StyleSheet.create({
   },
   questionImage: {
     width: '100%',
-    height: 180,
+    height: 360,
+    maxHeight: 560,
     borderRadius: radius.lg,
     backgroundColor: colors.surfaceMuted,
   },

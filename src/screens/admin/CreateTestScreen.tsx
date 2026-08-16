@@ -16,7 +16,8 @@ import { useAuthStore } from '../../store/authStore';
 import { colors, radius, spacing } from '../../theme';
 import { CreateTestQuestionPayload, ScholarshipAdmissionClass, ScholarshipTargetExam, TestType } from '../../types';
 import { RootStackScreenProps } from '../../navigation/types';
-import { FileImage, FolderOpen, ShieldAlert } from 'lucide-react-native';
+import { FileImage, FolderOpen, Save, ShieldAlert, Trash2 } from 'lucide-react-native';
+import { clearExamCreationDraft, loadExamCreationDraft, saveExamCreationDraft } from '../../utils/draftStorage';
 import {
   coerceDurationMinutes,
   combineScheduleInputs,
@@ -102,7 +103,7 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
   const [primarySubject, setPrimarySubject] = useState('Physics');
   const [durationMinutes, setDurationMinutes] = useState('60');
   const [type, setType] = useState<TestType>('weekly');
-  const [batchId, setBatchId] = useState<string>(batches[0]?.id ?? '');
+  const [batchId, setBatchId] = useState<string | undefined>(batches[0]?.id);
   const [scheduleDate, setScheduleDate] = useState(() => toDateInputValue());
   const [scheduleTime, setScheduleTime] = useState(() => toTimeInputValue());
   const [isDatePickerVisible, setIsDatePickerVisible] = useState(false);
@@ -112,6 +113,13 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
   const [questions, setQuestions] = useState<CreateTestQuestionPayload[]>([emptyQuestion()]);
   const [subjectRangePlan, setSubjectRangePlan] = useState('');
   const [uploadingImageIndex, setUploadingImageIndex] = useState<number | null>(null);
+  const [isOpenForAll, setIsOpenForAll] = useState(false);
+  const [correctMarks, setCorrectMarks] = useState('4');
+  const [wrongMarks, setWrongMarks] = useState('-1');
+  const [unattemptedMarks, setUnattemptedMarks] = useState('0');
+  const [hasCheckedDraft, setHasCheckedDraft] = useState(false);
+  const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
+
   const resolvedDurationMinutes = coerceDurationMinutes(durationMinutes);
   const isMultiSubject = subjectMode === 'multi';
   const nonBlankQuestionCount = useMemo(
@@ -119,6 +127,109 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
     [questions],
   );
   const listBottomInset = 120 + Math.max(insets.bottom, spacing.sm);
+
+  React.useEffect(() => {
+    async function checkForDraft() {
+      if (hasCheckedDraft) return;
+      setHasCheckedDraft(true);
+
+      const savedDraft = await loadExamCreationDraft();
+      if (!savedDraft) return;
+
+      Alert.alert(
+        'Restore Exam Creation Draft?',
+        `An unsaved exam draft created on ${new Date(savedDraft.savedAt).toLocaleString()} was found. Would you like to restore it?`,
+        [
+          {
+            text: 'Discard Draft',
+            style: 'destructive',
+            onPress: () => {
+              void clearExamCreationDraft();
+            },
+          },
+          {
+            text: 'Restore Draft',
+            onPress: () => {
+              setTitle(savedDraft.title || '');
+              setDescription(savedDraft.description || '');
+              setDurationMinutes(savedDraft.durationMinutes || '60');
+              setSubjectMode(savedDraft.subjectMode || 'single');
+              setPrimarySubject(savedDraft.primarySubject || 'Physics');
+              setType(savedDraft.type || 'weekly');
+              setBatchId(savedDraft.batchId || '');
+              setScheduleDate(savedDraft.scheduleDate || toDateInputValue());
+              setScheduleTime(savedDraft.scheduleTime || toTimeInputValue());
+              setScholarshipAdmissionClass(savedDraft.scholarshipAdmissionClass || '8th');
+              setScholarshipTargetExam(savedDraft.scholarshipTargetExam || 'boards');
+              if (savedDraft.questions && savedDraft.questions.length > 0) {
+                setQuestions(savedDraft.questions);
+              }
+              setSubjectRangePlan(savedDraft.subjectRangePlan || '');
+              setIsOpenForAll(savedDraft.isOpenForAll || false);
+              setCorrectMarks(savedDraft.correctMarks || '4');
+              setWrongMarks(savedDraft.wrongMarks || '-1');
+              setUnattemptedMarks(savedDraft.unattemptedMarks || '0');
+              setDraftSavedAt(savedDraft.savedAt);
+            },
+          },
+        ],
+      );
+    }
+
+    void checkForDraft();
+  }, [hasCheckedDraft]);
+
+  React.useEffect(() => {
+    if (!hasCheckedDraft) return;
+
+    const timer = setTimeout(() => {
+      if (title.trim() || questions.some((q) => q.prompt.trim())) {
+        void saveExamCreationDraft({
+          title,
+          description,
+          durationMinutes,
+          subjectMode,
+          primarySubject,
+          type,
+          batchId: batchId ?? '',
+          scheduleDate,
+          scheduleTime,
+          scholarshipAdmissionClass,
+          scholarshipTargetExam,
+          questions,
+          subjectRangePlan,
+          isOpenForAll,
+          correctMarks,
+          wrongMarks,
+          unattemptedMarks,
+          status: 'DRAFT',
+        }).then(() => {
+          setDraftSavedAt(new Date().toISOString());
+        });
+      }
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [
+    title,
+    description,
+    durationMinutes,
+    subjectMode,
+    primarySubject,
+    type,
+    batchId,
+    scheduleDate,
+    scheduleTime,
+    scholarshipAdmissionClass,
+    scholarshipTargetExam,
+    questions,
+    subjectRangePlan,
+    isOpenForAll,
+    correctMarks,
+    wrongMarks,
+    unattemptedMarks,
+    hasCheckedDraft,
+  ]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -214,8 +325,8 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
       return;
     }
 
-    if (type === 'weekly' && !batchId) {
-      Alert.alert('Batch required', 'Create at least one batch in Supabase before publishing a weekly test.');
+    if (type === 'weekly' && !batchId && !isOpenForAll) {
+      Alert.alert('Batch required', 'Select a batch for restricted exams or switch Access Type to Open for All.');
       return;
     }
 
@@ -275,6 +386,7 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
       });
 
       Alert.alert('Test created', 'The new paper is now available in the tests feed.');
+      await clearExamCreationDraft();
       navigation.goBack();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to publish the test right now.';
@@ -295,6 +407,7 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
         name: file.name,
         mimeType: file.type,
         folder: 'images',
+        file: (file as { file?: File }).file,
       });
 
       updateQuestion(index, (current) => ({
@@ -317,10 +430,24 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
     setQuestions((current) => [...current, emptyQuestion()]);
   }, []);
 
+  const handleDeleteQuestion = useCallback((indexToDelete: number) => {
+    setQuestions((current) => current.filter((_, idx) => idx !== indexToDelete));
+  }, []);
+
   const renderQuestionItem = useCallback(
     ({ item: question, index }: { item: CreateTestQuestionPayload; index: number }) => (
       <View style={styles.formCard}>
-        <Text style={styles.questionTitle}>Question {index + 1}</Text>
+        <View style={styles.questionHeaderRow}>
+          <Text style={styles.questionTitle}>Question {index + 1}</Text>
+          {questions.length > 1 ? (
+            <AnimatedPressable
+              style={styles.deleteQuestionButton}
+              onPress={() => handleDeleteQuestion(index)}>
+              <Trash2 size={14} color={colors.danger} />
+              <Text style={styles.deleteQuestionButtonText}>Delete Question</Text>
+            </AnimatedPressable>
+          ) : null}
+        </View>
         <Text style={styles.sectionLabel}>Question Type</Text>
         <View style={styles.choiceRow}>
           {(['mcq', 'integer'] as const).map((value) => (
@@ -463,7 +590,7 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
         />
       </View>
     ),
-    [handleQuestionImageUpload, isMultiSubject, primarySubject, updateQuestion, uploadingImageIndex],
+    [handleDeleteQuestion, handleQuestionImageUpload, isMultiSubject, primarySubject, questions.length, updateQuestion, uploadingImageIndex],
   );
 
   if (!isAdmin) {
@@ -597,21 +724,37 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
                   />
                 ) : null}
 
+                <Text style={styles.sectionLabel}>Access Type</Text>
+                <View style={styles.choiceRow}>
+                  <AnimatedPressable
+                    style={[styles.choiceChip, !isOpenForAll && styles.choiceChipActive]}
+                    onPress={() => setIsOpenForAll(false)}>
+                    <Text style={[styles.choiceText, !isOpenForAll && styles.choiceTextActive]}>Restricted Batch</Text>
+                  </AnimatedPressable>
+                  <AnimatedPressable
+                    style={[styles.choiceChip, isOpenForAll && styles.choiceChipActive]}
+                    onPress={() => setIsOpenForAll(true)}>
+                    <Text style={[styles.choiceText, isOpenForAll && styles.choiceTextActive]}>Open for All</Text>
+                  </AnimatedPressable>
+                </View>
+
                 {type === 'weekly' ? (
                   <>
-                    <Text style={styles.sectionLabel}>Batch</Text>
+                    <Text style={styles.sectionLabel}>Batch {isOpenForAll ? '(Optional for Open for All)' : ''}</Text>
                     <View style={styles.choiceRow}>
                       {batches.map((batch) => (
                         <AnimatedPressable
                           key={batch.id}
                           style={[styles.choiceChip, batchId === batch.id && styles.choiceChipActive]}
-                          onPress={() => setBatchId(batch.id)}>
+                          onPress={() => setBatchId((current) => (current === batch.id ? undefined : batch.id))}>
                           <Text style={[styles.choiceText, batchId === batch.id && styles.choiceTextActive]}>{batch.label}</Text>
                         </AnimatedPressable>
                       ))}
                     </View>
                   </>
-                ) : (
+                ) : null}
+
+                {type === 'scholarship' ? (
                   <>
                     <Text style={styles.sectionLabel}>Admission Class</Text>
                     <View style={styles.choiceRow}>
@@ -641,7 +784,38 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
                       ))}
                     </View>
                   </>
-                )}
+                ) : null}
+
+                <Text style={styles.sectionTitle}>Marking Scheme</Text>
+                <View style={styles.row}>
+                  <View style={styles.flexItem}>
+                    <InputField
+                      label="Correct Marks"
+                      placeholder="+4"
+                      keyboardType="numeric"
+                      value={correctMarks}
+                      onChangeText={setCorrectMarks}
+                    />
+                  </View>
+                  <View style={styles.flexItem}>
+                    <InputField
+                      label="Wrong Marks"
+                      placeholder="-1"
+                      keyboardType="numeric"
+                      value={wrongMarks}
+                      onChangeText={setWrongMarks}
+                    />
+                  </View>
+                  <View style={styles.flexItem}>
+                    <InputField
+                      label="Unattempted"
+                      placeholder="0"
+                      keyboardType="numeric"
+                      value={unattemptedMarks}
+                      onChangeText={setUnattemptedMarks}
+                    />
+                  </View>
+                </View>
               </View>
 
               {isMultiSubject ? (
@@ -812,10 +986,30 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: '700',
   },
+  questionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.xs,
+  },
   questionTitle: {
     color: colors.text,
     fontSize: 15,
     fontWeight: '800',
+  },
+  deleteQuestionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.sm,
+    backgroundColor: colors.dangerSoft ?? colors.surfaceMuted,
+  },
+  deleteQuestionButtonText: {
+    color: colors.danger,
+    fontSize: 11,
+    fontWeight: '700',
   },
   multilineInput: {
     minHeight: 76,

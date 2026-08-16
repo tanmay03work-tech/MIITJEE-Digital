@@ -12,3 +12,19 @@ android/build/
 ios/build/
 *.keystore
 *.jks
+
+# Crash logs and temporary JVM dumps
+hs_err_pid*
+replay_pid*
+
+# Tarballs and temporary archives
+*.tgz
+
+# Build cache variants
+.gradle-*
+node_modules_old/
+.tmp/
+tmp-native/
+.android-codex/
+toolchains/
+.vercel

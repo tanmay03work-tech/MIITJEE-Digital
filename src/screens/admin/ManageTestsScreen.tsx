@@ -2,7 +2,10 @@ import React, { useCallback, useDeferredValue, useMemo, useState } from 'react';
 import { Alert, FlatList, ListRenderItem, StyleSheet, Text, View } from 'react-native';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useFocusEffect } from '@react-navigation/native';
-import { PencilLine, Play, ShieldAlert, Trash2 } from 'lucide-react-native';
+import { PencilLine, Play, Share2, ShieldAlert, Trash2 } from 'lucide-react-native';
+
+import { generateExamShareLink } from '../../services/api/tests';
+import { getExamShareUrl } from '../../utils/urlHelper';
 
 import { fetchAdminTestsPage } from '../../services/api/admin';
 import { AdminListSkeleton } from '../../components/admin/AdminListSkeleton';
@@ -48,6 +51,10 @@ interface DraftState {
   scheduleTime: string;
   scholarshipAdmissionClass: ScholarshipAdmissionClass;
   scholarshipTargetExam: ScholarshipTargetExam;
+  isOpenForAll: boolean;
+  correctMarks: string;
+  wrongMarks: string;
+  unattemptedMarks: string;
 }
 
 function buildSchedulePickerDate(dateInput: string, timeInput: string) {
@@ -70,6 +77,10 @@ function buildDraft(test: TestItem): DraftState {
     scheduleTime: toTimeInputValue(test.scheduledAt),
     scholarshipAdmissionClass: test.scholarshipAdmissionClass ?? '8th',
     scholarshipTargetExam: test.scholarshipTargetExam ?? 'boards',
+    isOpenForAll: test.isOpenForAll ?? false,
+    correctMarks: String(test.correctMarks ?? 4),
+    wrongMarks: String(test.wrongMarks ?? -1),
+    unattemptedMarks: String(test.unattemptedMarks ?? 0),
   };
 }
 
@@ -194,8 +205,8 @@ export function ManageTestsScreen() {
       return;
     }
 
-    if (draft.type === 'weekly' && !draft.batchId) {
-      Alert.alert('Batch required', 'Weekly tests must stay attached to a batch.');
+    if (draft.type === 'weekly' && !draft.batchId && !draft.isOpenForAll) {
+      Alert.alert('Batch required', 'Select a batch for restricted exams or switch Access Type to Open for All.');
       return;
     }
 
@@ -209,7 +220,8 @@ export function ManageTestsScreen() {
         durationMinutes: coerceDurationMinutes(draft.durationMinutes),
         scheduledAt,
         type: draft.type,
-        batchId: draft.type === 'weekly' ? draft.batchId : undefined,
+        batchId: draft.type === 'weekly' ? (draft.batchId || undefined) : undefined,
+        isOpenForAll: draft.isOpenForAll,
         scholarshipAdmissionClass: draft.type === 'scholarship' ? draft.scholarshipAdmissionClass : undefined,
         scholarshipTargetExam: draft.type === 'scholarship' ? draft.scholarshipTargetExam : undefined,
       });
@@ -261,6 +273,28 @@ export function ManageTestsScreen() {
     [deleteTest],
   );
 
+  const handleShareLink = useCallback(async (test: TestItem) => {
+    try {
+      const res = await generateExamShareLink(test.id, test.isOpenForAll ?? false);
+      const shareUrl = getExamShareUrl(res.shareCode);
+
+      if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+        try {
+          await navigator.clipboard.writeText(shareUrl);
+        } catch {
+          // Ignore clipboard write failure if restricted by permissions
+        }
+      }
+
+      Alert.alert(
+        'Shareable Exam Link Copied!',
+        `Unique Exam Code: ${res.shareCode}\nAccess Mode: ${res.isOpenForAll ? 'OPEN FOR ALL' : 'RESTRICTED BATCH'}\n\nVercel Production Link:\n${shareUrl}`,
+      );
+    } catch {
+      Alert.alert('Unable to generate link', 'Please try again.');
+    }
+  }, []);
+
   const renderTestCard = useCallback<ListRenderItem<TestItem>>(
     ({ item: test }) => {
       const isEditing = editingTestId === test.id;
@@ -273,6 +307,7 @@ export function ManageTestsScreen() {
           <View style={styles.badgeRow}>
             <Badge label={test.type} tone={test.type === 'scholarship' ? 'warning' : 'primary'} />
             <Badge label={statusLabel} tone={testActive ? 'success' : 'warning'} />
+            {test.shareCode ? <Badge label={`Code: ${test.shareCode}`} tone="primary" /> : null}
           </View>
 
           <Text style={styles.title}>{test.title}</Text>
@@ -288,6 +323,11 @@ export function ManageTestsScreen() {
           </Text>
 
           <View style={styles.actionRow}>
+            <AnimatedPressable style={styles.secondaryButton} onPress={() => void handleShareLink(test)}>
+              <Share2 size={16} color={colors.primary} />
+              <Text style={styles.secondaryButtonText}>Link</Text>
+            </AnimatedPressable>
+
             <AnimatedPressable style={styles.secondaryButton} onPress={() => handleStartEdit(test)}>
               <PencilLine size={16} color={colors.primary} />
               <Text style={styles.secondaryButtonText}>Edit</Text>
@@ -295,7 +335,7 @@ export function ManageTestsScreen() {
             {!testActive ? (
               <AnimatedPressable style={[styles.statusButton, styles.startButton]} onPress={() => void handleStartEarly(test)}>
                 <Play size={16} color={colors.white} />
-                <Text style={styles.statusButtonText}>Start Early</Text>
+                <Text style={styles.statusButtonText}>Start</Text>
               </AnimatedPressable>
             ) : null}
             <AnimatedPressable style={styles.deleteButton} onPress={() => handleDelete(test)}>
@@ -349,6 +389,20 @@ export function ManageTestsScreen() {
                 ))}
               </View>
 
+              <Text style={styles.sectionLabel}>Access Type</Text>
+              <View style={styles.choiceRow}>
+                <AnimatedPressable
+                  style={[styles.choiceChip, !draft.isOpenForAll && styles.choiceChipActive]}
+                  onPress={() => setDraft((current) => (current ? { ...current, isOpenForAll: false } : current))}>
+                  <Text style={[styles.choiceText, !draft.isOpenForAll && styles.choiceTextActive]}>Restricted Batch</Text>
+                </AnimatedPressable>
+                <AnimatedPressable
+                  style={[styles.choiceChip, draft.isOpenForAll && styles.choiceChipActive]}
+                  onPress={() => setDraft((current) => (current ? { ...current, isOpenForAll: true } : current))}>
+                  <Text style={[styles.choiceText, draft.isOpenForAll && styles.choiceTextActive]}>Open for All</Text>
+                </AnimatedPressable>
+              </View>
+
               <View style={styles.twoColumnRow}>
                 <View style={styles.flexItem}>
                   <Text style={styles.sectionLabel}>Start Date</Text>
@@ -382,13 +436,17 @@ export function ManageTestsScreen() {
 
               {draft.type === 'weekly' ? (
                 <>
-                  <Text style={styles.sectionLabel}>Batch</Text>
+                  <Text style={styles.sectionLabel}>Batch {draft.isOpenForAll ? '(Optional for Open for All)' : ''}</Text>
                   <View style={styles.choiceRow}>
                     {batches.map((batch) => (
                       <AnimatedPressable
                         key={`${test.id}_${batch.id}`}
                         style={[styles.choiceChip, draft.batchId === batch.id && styles.choiceChipActive]}
-                        onPress={() => setDraft((current) => (current ? { ...current, batchId: batch.id } : current))}>
+                        onPress={() =>
+                          setDraft((current) =>
+                            current ? { ...current, batchId: current.batchId === batch.id ? '' : batch.id } : current,
+                          )
+                        }>
                         <Text style={[styles.choiceText, draft.batchId === batch.id && styles.choiceTextActive]}>
                           {batch.label}
                         </Text>

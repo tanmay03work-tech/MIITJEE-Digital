@@ -274,6 +274,21 @@ export function LeaderboardScreen() {
               <Badge label="Current User" tone="primary" />
             </Card>
           </View>
+        ) : user ? (
+          <View style={styles.currentUserWrap}>
+            <Text style={styles.sectionTitle}>Your Position</Text>
+            <Card style={styles.currentUserCard}>
+              <View style={styles.currentUserText}>
+                <Text style={styles.currentUserName}>{user.fullName}</Text>
+                <Text style={styles.currentUserMeta}>
+                  {user.rank > 0
+                    ? `Overall Profile Rank #${user.rank} | Avg score ${user.averageScore}%`
+                    : 'No test submissions recorded yet for this selection. Complete a paper to see your rank here.'}
+                </Text>
+              </View>
+              <Badge label="Your Profile" tone="primary" />
+            </Card>
+          </View>
         ) : null}
 
         {entries.length > 0 ? (
@@ -360,6 +375,7 @@ export function LeaderboardScreen() {
         </View>
       ) : entries.length === 0 ? (
         <FlatList
+          style={styles.flex}
           data={[]}
           renderItem={null}
           ListHeaderComponent={listHeader}
@@ -369,6 +385,7 @@ export function LeaderboardScreen() {
         />
       ) : (
         <FlatList
+          style={styles.flex}
           data={entries}
           keyExtractor={(item) => item.userId}
           renderItem={renderRow}
@@ -387,6 +404,9 @@ export function LeaderboardScreen() {
 }
 
 const styles = StyleSheet.create({
+  flex: {
+    flex: 1,
+  },
   listContent: {
     paddingBottom: spacing.xxxl,
   },

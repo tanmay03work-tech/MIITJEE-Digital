@@ -25,6 +25,8 @@ import {
   fetchQuestionSets,
   fetchQuestionSetQuestions,
   createQuestionSet,
+  deleteQuestionSet,
+  fetchActivityLogs,
 } from '../services/api/admin';
 import { fetchBatches, fetchCourses } from '../services/api/content';
 import {
@@ -40,8 +42,10 @@ import {
   submitEnrollmentQuery,
 } from '../services/api/tests';
 import { fetchProfileById } from '../services/api/client';
+import { activityLog } from '../services/api/activityLogger';
 import { useAuthStore } from './authStore';
 import {
+  ActivityLogEntry,
   AnalyticsSnapshot,
   AutoSubmitEvent,
   AppUser,
@@ -63,6 +67,7 @@ import {
   ScholarshipRegistrationPayload,
   ScholarshipRegistrationRecord,
   StudentInsights,
+  SubmitAttemptPayload,
   SubmittedTestResponse,
   TestItem,
   TestAttemptReviewItem,
@@ -92,6 +97,7 @@ interface AppState {
   scholarshipRegistrations: ScholarshipRegistrationRecord[];
   autoSubmitEvents: AutoSubmitEvent[];
   violationAnalytics: ViolationSummary[];
+  activityLogs: ActivityLogEntry[];
   studentInsights?: StudentInsights;
   studentInsightsFetchedAt?: number;
   questionCache: Record<string, TestQuestion[]>;
@@ -106,6 +112,7 @@ interface AppState {
   error?: string;
   bootstrap: (currentUser?: AppUser | null) => Promise<void>;
   loadAdminData: (currentUser?: AppUser | null, force?: boolean) => Promise<void>;
+  loadActivityLogs: (options?: { category?: string; userId?: string; limit?: number; offset?: number }) => Promise<ActivityLogEntry[]>;
   loadLeaderboard: (payload?: { scope?: LeaderboardScope; batchId?: string | null; testId?: string }) => Promise<LeaderboardEntry[]>;
   loadStudentInsights: (userId?: string) => Promise<StudentInsights>;
   loadQuestions: (testId: string) => Promise<TestQuestion[]>;
@@ -113,18 +120,17 @@ interface AppState {
   loadQuestionBankSets: (force?: boolean) => Promise<QuestionBankSet[]>;
   loadQuestionSetQuestions: (setId: number) => Promise<QuestionBankQuestion[]>;
   createQuestionSet: (payload: { pdfName: string; questions: Array<{ question: string; options: string[]; correct_answer: string; type: 'mcq' | 'integer'; explanation?: string; image_url?: string | null }> }) => Promise<{ set_id: number; question_count: number }>;
+  deleteQuestionSet: (setId: number) => Promise<void>;
   toggleQuestionBankSelection: (question: QuestionBankQuestion) => void;
+  selectAllQuestionBankQuestions: (questions: QuestionBankQuestion[]) => void;
+  deselectAllQuestionBankQuestions: (questions: QuestionBankQuestion[]) => void;
   clearQuestionBankSelection: () => void;
   queueSelectedQuestionBankQuestions: () => CreateTestPayload['questions'];
   consumePendingQuestionBankImport: () => CreateTestPayload['questions'];
   importQuestionsFromPdf: (payload: PdfImportPayload) => Promise<
     PdfImportResponse & { draftQuestions: CreateTestPayload['questions'] }
   >;
-  submitAttempt: (payload: {
-    testId: string;
-    userId: string;
-    answers: Record<string, string>;
-  }) => Promise<SubmittedTestResponse>;
+  submitAttempt: (payload: SubmitAttemptPayload) => Promise<SubmittedTestResponse>;
   submitEnrollmentQuery: (payload: EnrollmentQueryPayload) => Promise<void>;
   registerScholarshipAttempt: (payload: ScholarshipRegistrationPayload) => Promise<void>;
   submitGeneralEnquiry: (payload: EnquiryPayload) => Promise<void>;
@@ -245,6 +251,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   scholarshipRegistrations: [],
   autoSubmitEvents: [],
   violationAnalytics: [],
+  activityLogs: [],
   studentInsights: undefined,
   studentInsightsFetchedAt: undefined,
   questionCache: {},
@@ -442,6 +449,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
     }
   },
+  loadActivityLogs: async (options) => {
+    const logs = await fetchActivityLogs(options);
+    set({ activityLogs: logs });
+    return logs;
+  },
   loadLeaderboard: async (payload) => {
     const scope = payload?.scope ?? 'overall_history';
     const testId = payload?.testId;
@@ -517,17 +529,19 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   loadQuestions: async (testId) => {
     const cached = get().questionCache[testId];
-    if (cached) {
+    if (cached && cached.length > 0) {
       return cached;
     }
 
     const questions = await fetchQuestions(testId);
-    set((state) => ({
-      questionCache: {
-        ...state.questionCache,
-        [testId]: questions,
-      },
-    }));
+    if (questions && questions.length > 0) {
+      set((state) => ({
+        questionCache: {
+          ...state.questionCache,
+          [testId]: questions,
+        },
+      }));
+    }
     return questions;
   },
   loadReview: async (resultId) => {
@@ -557,6 +571,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   loadQuestionSetQuestions: async (setId) => fetchQuestionSetQuestions(setId),
   createQuestionSet: async (payload) => {
     const created = await createQuestionSet(payload);
+    const currentUser = useAuthStore.getState().user;
+    activityLog.logAdminAction('QUESTION_SET_CREATED', {
+      adminUserId: currentUser?.id,
+      adminName: currentUser?.fullName,
+      targetId: String(created.set_id),
+      targetName: payload.pdfName,
+    });
     set((state) => ({
       questionBankSets: [
         {
@@ -570,6 +591,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
     return created;
   },
+  deleteQuestionSet: async (setId) => {
+    await deleteQuestionSet(setId);
+    const currentUser = useAuthStore.getState().user;
+    activityLog.logAdminAction('QUESTION_SET_DELETED', {
+      adminUserId: currentUser?.id,
+      adminName: currentUser?.fullName,
+      targetId: String(setId),
+    });
+    set((state) => ({
+      questionBankSets: state.questionBankSets.filter((entry) => entry.setId !== setId),
+      questionBankSelection: state.questionBankSelection.filter((entry) => entry.setId !== setId),
+    }));
+  },
   toggleQuestionBankSelection: (question) =>
     set((state) => {
       const exists = state.questionBankSelection.some((entry) => entry.id === question.id);
@@ -577,6 +611,21 @@ export const useAppStore = create<AppState>((set, get) => ({
         questionBankSelection: exists
           ? state.questionBankSelection.filter((entry) => entry.id !== question.id)
           : [...state.questionBankSelection, question],
+      };
+    }),
+  selectAllQuestionBankQuestions: (questions) =>
+    set((state) => {
+      const existingIds = new Set(state.questionBankSelection.map((q) => q.id));
+      const newItems = questions.filter((q) => !existingIds.has(q.id));
+      return {
+        questionBankSelection: [...state.questionBankSelection, ...newItems],
+      };
+    }),
+  deselectAllQuestionBankQuestions: (questions) =>
+    set((state) => {
+      const idsToRemove = new Set(questions.map((q) => q.id));
+      return {
+        questionBankSelection: state.questionBankSelection.filter((q) => !idsToRemove.has(q.id)),
       };
     }),
   clearQuestionBankSelection: () => set({ questionBankSelection: [] }),
@@ -600,6 +649,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const response = await submitAttempt(payload);
       const signedInUser = useAuthStore.getState().user;
+
+      activityLog.logExam('TEST_SUBMITTED', {
+        userId: payload.userId,
+        studentName: signedInUser?.fullName,
+        testId: payload.testId,
+        status: 'success',
+        score: response.result.score,
+      });
 
       if (response.user && signedInUser?.id === response.user.id) {
         useAuthStore.getState().setUser(response.user);
@@ -688,6 +745,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   createTest: async (payload) => {
     const test = await createTest(payload);
+    const currentUser = useAuthStore.getState().user;
+    activityLog.logAdminAction('TEST_CREATED', {
+      adminUserId: currentUser?.id,
+      adminName: currentUser?.fullName,
+      targetId: test.id,
+      targetName: test.title,
+    });
+
     const questions = payload.questions.map((question, index) => ({
       id: `${test.id}_draft_${index + 1}`,
       testId: test.id,
@@ -716,6 +781,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   updateTest: async (payload) => {
     const updatedTest = await updateTest(payload);
+    const currentUser = useAuthStore.getState().user;
+    activityLog.logAdminAction('TEST_UPDATED', {
+      adminUserId: currentUser?.id,
+      adminName: currentUser?.fullName,
+      targetId: updatedTest.id,
+      targetName: updatedTest.title,
+    });
 
     set((state) => ({
       tests: state.tests
@@ -728,6 +800,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   setTestStarted: async (testId, isStarted) => {
     const updatedTest = await setTestStarted(testId, isStarted);
+    const currentUser = useAuthStore.getState().user;
+    activityLog.logAdminAction(isStarted ? 'TEST_STARTED' : 'TEST_STOPPED', {
+      adminUserId: currentUser?.id,
+      adminName: currentUser?.fullName,
+      targetId: updatedTest.id,
+      targetName: updatedTest.title,
+    });
 
     set((state) => ({
       tests: state.tests.map((test) => (test.id === updatedTest.id ? updatedTest : test)),
@@ -737,6 +816,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   createBatch: async (payload) => {
     const batch = await createBatch(payload);
+    const currentUser = useAuthStore.getState().user;
+    activityLog.logAdminAction('BATCH_CREATED', {
+      adminUserId: currentUser?.id,
+      adminName: currentUser?.fullName,
+      targetId: batch.id,
+      targetName: batch.label,
+    });
 
     set((state) => ({
       batches: [...state.batches, batch].sort((left, right) => left.label.localeCompare(right.label)),
@@ -746,6 +832,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   assignBatch: async (payload) => {
     const updatedUser = await assignBatch(payload);
+    const currentUser = useAuthStore.getState().user;
+    activityLog.logAdminAction('USER_ROLE_CHANGED', {
+      adminUserId: currentUser?.id,
+      adminName: currentUser?.fullName,
+      targetId: updatedUser.id,
+      targetName: `${updatedUser.fullName} (${updatedUser.role})`,
+    });
     const signedInUser = useAuthStore.getState().user;
     if (signedInUser?.id === updatedUser.id) {
       useAuthStore.getState().setUser(updatedUser);
@@ -757,6 +850,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   approveAdmin: async (userId) => {
     const updatedUser = await approveAdmin(userId);
+    const currentUser = useAuthStore.getState().user;
+    activityLog.logAdminAction('USER_ROLE_CHANGED', {
+      adminUserId: currentUser?.id,
+      adminName: currentUser?.fullName,
+      targetId: updatedUser.id,
+      targetName: `${updatedUser.fullName} (admin approved)`,
+    });
     const signedInUser = useAuthStore.getState().user;
     if (signedInUser?.id === updatedUser.id) {
       useAuthStore.getState().setUser(updatedUser);
@@ -768,6 +868,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   deleteTest: async (testId) => {
     await deleteTest(testId);
+    const currentUser = useAuthStore.getState().user;
+    activityLog.logAdminAction('TEST_DELETED', {
+      adminUserId: currentUser?.id,
+      adminName: currentUser?.fullName,
+      targetId: testId,
+    });
     set((state) => ({
       tests: state.tests.filter((test) => test.id !== testId),
       questionCache: Object.fromEntries(Object.entries(state.questionCache).filter(([key]) => key !== testId)),
@@ -782,6 +888,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   deleteBatch: async (batchId) => {
     await deleteBatch(batchId);
+    const currentUser = useAuthStore.getState().user;
+    activityLog.logAdminAction('BATCH_DELETED', {
+      adminUserId: currentUser?.id,
+      adminName: currentUser?.fullName,
+      targetId: batchId,
+    });
     const signedInUser = useAuthStore.getState().user;
     if (signedInUser?.batchId === batchId) {
       useAuthStore.getState().setUser({
@@ -806,6 +918,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   wipeLeaderboard: async () => {
     await wipeLeaderboard();
+    const currentUser = useAuthStore.getState().user;
+    activityLog.logAdminAction('LEADERBOARD_WIPED', {
+      adminUserId: currentUser?.id,
+      adminName: currentUser?.fullName,
+    });
     set((state) => ({
       results: [],
       leaderboard: [],
@@ -824,6 +941,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   deleteAttempt: async (attemptId) => {
     await deleteAttempt(attemptId);
+    const currentUser = useAuthStore.getState().user;
+    activityLog.logAdminAction('ATTEMPT_DELETED', {
+      adminUserId: currentUser?.id,
+      adminName: currentUser?.fullName,
+      targetId: attemptId,
+    });
     set((state) => ({
       results: state.results.filter((result) => result.id !== attemptId),
       reviewCache: Object.fromEntries(Object.entries(state.reviewCache).filter(([key]) => key !== attemptId)),

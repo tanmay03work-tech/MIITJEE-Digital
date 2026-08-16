@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 
 import { handleDeepLink, loginWithGoogle, restoreAuthenticatedUser, signIn, signOut, signUp } from '../services/api/auth';
+import { activityLog } from '../services/api/activityLogger';
 import { AppUser, SignInPayload, SignUpPayload } from '../types';
 import { useAppStore } from './appStore';
 import { useTestSessionStore } from './testSessionStore';
@@ -123,6 +124,16 @@ export const useAuthStore = create<AuthState>((set) => ({
   setUser: (user) => set({ user }),
   clearError: () => set({ error: undefined, errorKind: undefined }),
   signOut: async () => {
+    const currentUser = useAuthStore.getState().user;
+    if (currentUser) {
+      activityLog.logAuth('SIGN_OUT', {
+        userId: currentUser.id,
+        studentName: currentUser.fullName,
+        email: currentUser.email,
+        status: 'info',
+      });
+      await activityLog.flush();
+    }
     await signOut();
     useTestSessionStore.getState().reset();
     useAppStore.getState().reset();

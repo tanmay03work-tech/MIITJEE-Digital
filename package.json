@@ -6,9 +6,16 @@
     "postinstall": "node scripts/fix-document-picker-android.js && node scripts/fix-splash-screen-android.js && node scripts/fix-worklets-android.js && node scripts/fix-reanimated-android.js",
     "android": "node scripts/run-android.js",
     "android:build": "node scripts/build-android.js",
+    "android:apk": "node scripts/build-android.js apk",
     "android:bundle": "node scripts/build-android.js release",
     "start": "node scripts/start-metro.js",
-    "lint": "tsc --noEmit"
+    "desktop:install": "npm --prefix desktop install",
+    "desktop:dev": "npm run web:build && npm --prefix desktop start",
+    "desktop:build": "npm run web:build && npm --prefix desktop run build:win",
+    "web:build": "node --max-old-space-size=4096 ./node_modules/vite/bin/vite.js build",
+    "web:dev": "vite",
+    "lint": "tsc --noEmit",
+    "test": "jest"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.1.2",
@@ -19,7 +26,9 @@
     "@react-navigation/native-stack": "^7.0.0",
     "axios": "^1.13.2",
     "lucide-react-native": "^0.546.0",
-    "react": "19.2.3",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^3.11.174",
+    "react": "^19.2.8",
     "react-native": "0.84.0",
     "react-native-document-picker": "^9.3.1",
     "react-native-gesture-handler": "^2.28.0",
@@ -41,8 +50,17 @@
     "@react-native/babel-preset": "0.84.0",
     "@react-native/metro-config": "0.84.0",
     "@react-native/typescript-config": "0.84.0",
+    "@types/jest": "^29.5.14",
     "@types/react": "^19.2.0",
-    "typescript": "^5.8.3"
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "jest": "^29.7.0",
+    "lucide-react": "^1.28.0",
+    "react-dom": "^19.2.8",
+    "react-native-web": "^0.21.2",
+    "ts-jest": "^29.2.5",
+    "typescript": "^5.8.3",
+    "vite": "^8.2.0"
   },
   "overrides": {
     "hermes-compiler": "250829098.0.10"

@@ -11,6 +11,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import miitjeeLogo from '../../assets/branding/miitjee-logo.png';
 import { colors, spacing } from '../../theme';
 
 export function AnimatedSplashScreen() {
@@ -65,7 +66,7 @@ export function AnimatedSplashScreen() {
       <View style={styles.centerWrap}>
         <Animated.View style={[styles.pulseRing, pulseStyle]} />
         <Animated.Image
-          source={require('../../assets/branding/miitjee-logo.png')}
+          source={miitjeeLogo}
           style={[styles.logo, logoStyle]}
           resizeMode="contain"
         />

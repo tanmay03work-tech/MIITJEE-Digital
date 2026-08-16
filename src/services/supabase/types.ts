@@ -71,6 +71,10 @@ export interface TestRow {
   started_at: string | null;
   scholarship_admission_class: '8th' | '9th' | '10th' | 'jee' | 'neet' | null;
   scholarship_target_exam: 'boards' | 'jee' | 'neet' | null;
+  share_code?: string | null;
+  is_open_for_all?: boolean;
+  is_link_revoked?: boolean;
+  link_expires_at?: string | null;
 }
 
 export interface TestQuestionRow {
@@ -83,6 +87,9 @@ export interface TestQuestionRow {
   integer_answer: number | null;
   explanation: string;
   image_url: string | null;
+  option_image_urls?: string[] | null;
+  source_page?: number | null;
+  source_region?: string | null;
   subject_label: string | null;
 }
 
@@ -117,13 +124,18 @@ export interface LeaderboardRow {
 }
 
 export interface ResultRow {
-  id: string;
+  id?: string;
+  attempt_id?: string;
+  result_id?: string;
   test_id: string;
   user_id: string;
+  student_name?: string;
   score: number;
   correct_answers: number;
+  wrong_answers?: number;
+  unattempted?: number;
   total_questions: number;
-  rank: number;
+  rank?: number;
   percentile: number;
   submitted_at: string;
 }
@@ -149,6 +161,7 @@ export interface ReviewRow {
   user_answer: string;
   correct_answer: string;
   is_correct: boolean;
+  is_unattempted?: boolean;
   explanation: string;
   image_url: string | null;
 }
@@ -275,3 +288,141 @@ export interface StudentInsightsRpcResponse {
   subject_breakdown: StudentSubjectInsightRow[];
   weak_areas: StudentSubjectInsightRow[];
 }
+
+export interface ActivityLogRow {
+  id: string;
+  user_id: string | null;
+  student_name: string | null;
+  category: string;
+  event_type: string;
+  status: string;
+  device_info: string | null;
+  details: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface PdfNativeQuestionRow {
+  id: string;
+  pdf_id: string;
+  pdf_url: string;
+  question_number: string;
+  page_start: number;
+  page_end: number;
+  bbox: { x: number; y: number; width: number; height: number };
+  regions?: Array<{ id: string; pageNumber: number; bbox: { x: number; y: number; width: number; height: number }; role?: string; orderIndex: number; label?: string }>;
+  subject: string;
+  chapter: string | null;
+  topic: string | null;
+  question_type: string;
+  correct_answer: string | null;
+  marks: number;
+  negative_marks: number;
+  review_status: string;
+  raw_text: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PdfNativeTestRow {
+  id: string;
+  title: string;
+  description: string | null;
+  duration_minutes: number;
+  subject: string;
+  total_questions: number;
+  status: 'DRAFT' | 'READY' | 'LIVE' | 'ARCHIVED';
+  visibility?: 'OPEN_FOR_ALL' | 'BATCH_ONLY';
+  starts_at?: string;
+  ends_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PdfNativeTestSetRow {
+  id: string;
+  test_id: string;
+  set_id: string;
+  order_index: number;
+  created_at: string;
+}
+
+export interface PdfNativeTestBatchAccessRow {
+  id: string;
+  test_id: string;
+  batch_id: string;
+  created_at: string;
+}
+
+export interface PdfNativeTestSectionRow {
+  id: string;
+  test_id: string;
+  set_id?: string | null;
+  subject: string;
+  question_type?: string;
+  section_order: number;
+  question_start: number;
+  question_end: number;
+  mcq_count: number;
+  integer_count: number;
+  correct_marks: number;
+  negative_marks: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PdfNativeTestQuestionRow {
+  id: string;
+  test_id: string;
+  question_id: string;
+  order_index: number;
+  created_at: string;
+}
+
+export interface PdfNativeAttemptRow {
+  id: string;
+  test_id: string;
+  user_id: string | null;
+  student_name: string | null;
+  total_questions: number;
+  attempted_count: number;
+  correct_count: number;
+  wrong_count: number;
+  unattempted_count: number;
+  total_score: number;
+  created_at: string;
+}
+
+export interface PdfNativeAttemptAnswerRow {
+  id: string;
+  attempt_id: string;
+  question_id: string;
+  question_number: string;
+  selected_answer: string | null;
+  correct_answer: string;
+  status: 'CORRECT' | 'WRONG' | 'UNATTEMPTED';
+  awarded_marks: number;
+  created_at: string;
+}
+
+export interface PdfNativeSetRow {
+  id: string;
+  set_name: string;
+  source_pdf_id: string;
+  pdf_url: string | null;
+  subject: string;
+  description: string | null;
+  total_questions: number;
+  status: 'DRAFT' | 'READY' | 'ARCHIVED';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PdfNativeSetQuestionRow {
+  id: string;
+  set_id: string;
+  question_id: string;
+  order_index: number;
+  created_at: string;
+}
+
+

@@ -1,5 +1,5 @@
 import React, { memo, useCallback, useMemo, useState } from 'react';
-import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, FlatList, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CheckSquare, ShieldAlert, Square } from 'lucide-react-native';
@@ -69,17 +69,43 @@ const QuestionSetQuestionCard = memo(
         </View>
 
         <Text style={styles.questionText}>{formattedQuestion}</Text>
+
+        {item.imageUrl ? (
+          <Image
+            source={{ uri: item.imageUrl }}
+            style={styles.questionImage}
+            resizeMode="contain"
+            onError={(e) => {
+              console.error('QUESTION IMAGE FAILED TO LOAD', {
+                src: item.imageUrl,
+                questionId: item.id,
+                error: e.nativeEvent,
+              });
+            }}
+          />
+        ) : null}
+
+        {item.needsReview ? (
+          <View style={styles.reviewBadge}>
+            <Text style={styles.reviewBadgeText}>Needs Review (AI Confidence: {Math.round((item.aiConfidence ?? 0.75) * 100)}%)</Text>
+          </View>
+        ) : null}
+
         {formattedOptions.length > 0 ? (
           <View style={styles.optionList}>
             {formattedOptions.map((option, optionIndex) => (
-              <Text
-                key={`${item.id}_${optionIndex}`}
-                style={[
-                  styles.optionText,
-                  item.options[optionIndex] === item.correctAnswer ? styles.correctOptionText : null,
-                ]}>
-                {optionIndex + 1}. {option}
-              </Text>
+              <View key={`${item.id}_${optionIndex}`} style={styles.optionRow}>
+                <Text
+                  style={[
+                    styles.optionText,
+                    item.options[optionIndex] === item.correctAnswer ? styles.correctOptionText : null,
+                  ]}>
+                  {optionIndex + 1}. {option}
+                </Text>
+                {item.optionImageUrls && item.optionImageUrls[optionIndex] ? (
+                  <Image source={{ uri: item.optionImageUrls[optionIndex] }} style={styles.optionImage} resizeMode="contain" />
+                ) : null}
+              </View>
             ))}
           </View>
         ) : (
@@ -103,10 +129,26 @@ export function QuestionSetQuestionsScreen({ navigation, route }: RootStackScree
   const loadQuestionSetQuestions = useAppStore((state) => state.loadQuestionSetQuestions);
   const questionBankSelection = useAppStore((state) => state.questionBankSelection);
   const toggleQuestionBankSelection = useAppStore((state) => state.toggleQuestionBankSelection);
+  const selectAllQuestionBankQuestions = useAppStore((state) => state.selectAllQuestionBankQuestions);
+  const deselectAllQuestionBankQuestions = useAppStore((state) => state.deselectAllQuestionBankQuestions);
   const queueSelectedQuestionBankQuestions = useAppStore((state) => state.queueSelectedQuestionBankQuestions);
 
   const [isLoading, setIsLoading] = useState(false);
   const [questions, setQuestions] = useState<QuestionBankQuestion[]>([]);
+
+  const allSetQuestionsSelected = useMemo(() => {
+    if (questions.length === 0) return false;
+    const selectedIds = new Set(questionBankSelection.map((q) => q.id));
+    return questions.every((q) => selectedIds.has(q.id));
+  }, [questionBankSelection, questions]);
+
+  const handleToggleSelectAll = useCallback(() => {
+    if (allSetQuestionsSelected) {
+      deselectAllQuestionBankQuestions(questions);
+    } else {
+      selectAllQuestionBankQuestions(questions);
+    }
+  }, [allSetQuestionsSelected, deselectAllQuestionBankQuestions, questions, selectAllQuestionBankQuestions]);
 
   const loadQuestions = useCallback(async () => {
     setIsLoading(true);
@@ -198,10 +240,26 @@ export function QuestionSetQuestionsScreen({ navigation, route }: RootStackScree
               <AppHeader title={`Set ${setId}`} subtitle={setName} showLogo={false} />
               {mode === 'picker' ? (
                 <Card style={styles.selectionCard}>
-                  <Text style={styles.selectionTitle}>{selectedCount} selected for this paper</Text>
-                  <Text style={styles.selectionHint}>
-                    Selection numbering continues across sets. Keep selecting here, then use the fixed button below whenever you are ready.
-                  </Text>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <View style={{ flex: 1, paddingRight: spacing.xs }}>
+                      <Text style={styles.selectionTitle}>{selectedCount} selected for this paper</Text>
+                      <Text style={styles.selectionHint}>
+                        Selection numbering continues across sets. Keep selecting here, then use the fixed button below when ready.
+                      </Text>
+                    </View>
+                    <AnimatedPressable
+                      style={{
+                        backgroundColor: allSetQuestionsSelected ? colors.danger : colors.primary,
+                        paddingHorizontal: spacing.md,
+                        paddingVertical: spacing.sm,
+                        borderRadius: radius.md,
+                      }}
+                      onPress={handleToggleSelectAll}>
+                      <Text style={{ color: colors.white, fontWeight: '700', fontSize: 13 }}>
+                        {allSetQuestionsSelected ? 'Deselect All' : 'Select All'}
+                      </Text>
+                    </AnimatedPressable>
+                  </View>
                 </Card>
               ) : null}
             </>
@@ -338,6 +396,36 @@ const styles = StyleSheet.create({
   correctOptionText: {
     color: colors.success,
     fontWeight: '700',
+  },
+  questionImage: {
+    width: '100%',
+    height: 180,
+    borderRadius: radius.md,
+    marginVertical: spacing.xs,
+  },
+  reviewBadge: {
+    backgroundColor: '#FFF4E5',
+    borderColor: '#FFE0B2',
+    borderWidth: 1,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.sm,
+    alignSelf: 'flex-start',
+    marginVertical: spacing.xs,
+  },
+  reviewBadgeText: {
+    color: '#E65100',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  optionRow: {
+    gap: spacing.xs,
+  },
+  optionImage: {
+    width: '100%',
+    height: 100,
+    borderRadius: radius.sm,
+    marginVertical: 2,
   },
   integerAnswer: {
     color: colors.success,

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, AppState, AppStateStatus, BackHandler, FlatList, Image, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, AppState, AppStateStatus, BackHandler, FlatList, Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Flag, LayoutGrid, Timer } from 'lucide-react-native';
+import { Flag, LayoutGrid, Timer, X } from 'lucide-react-native';
 import Animated, { FadeInUp, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -15,19 +15,81 @@ import { Screen } from '../../components/common/Screen';
 import { OptionCard } from '../../components/tests/OptionCard';
 import { QuestionPaletteSheet } from '../../components/tests/QuestionPaletteSheet';
 import { RootStackScreenProps } from '../../navigation/types';
-import { fetchExistingAttemptForTest, logViolation } from '../../services/api/tests';
+import { fetchExistingAttemptForTest, logViolation, fetchTests } from '../../services/api/tests';
+import { activityLog } from '../../services/api/activityLogger';
 import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
 import { useTestSessionStore } from '../../store/testSessionStore';
 import { colors, radius, spacing } from '../../theme';
+import { TestItem } from '../../types';
 import { getEligibility } from '../../utils/accessControl';
 import { formatExamTextForDisplay } from '../../utils/examText';
 import { formatClock } from '../../utils/formatters';
 import { getTestLockedMessage } from '../../utils/testAvailability';
+import * as pdfjsLib from 'pdfjs-dist';
+import { extractPdfPagesMetadata } from '../../services/pdf-native/pdfNativeParser';
+import { getPdfDocument } from '../../services/pdf-native/pdfDocumentCache';
+import { getPdfNativeTestById } from '../../services/pdf-native/pdfNativeTestService';
+import { mapPdfNativeTestToCbtTestItem, fetchPdfNativeCbtQuestions } from '../../services/pdf-native/pdfNativeCbtAdapter';
+import { PdfNativeQuestion } from '../../services/pdf-native/pdfNativeTypes';
+import { PdfNativePreview } from '../admin/PdfNativeTestBuilder/PdfNativePreview';
 
-const MAX_WARNINGS = 3;
-const AUTO_SUBMIT_VIOLATION = MAX_WARNINGS + 1;
-const VIOLATION_DEBOUNCE_MS = 1500;
+const MAX_WARNINGS = 2;
+const AUTO_SUBMIT_THRESHOLD = 3;
+const VIOLATION_DEBOUNCE_MS = 2000;
+
+interface ExamTimerCardProps {
+  isWeeklyProctored: boolean;
+  violationCount: number;
+  isFlagged: boolean;
+  progress: number;
+}
+
+const ExamTimerCard = React.memo(function ExamTimerCard({
+  isWeeklyProctored,
+  violationCount,
+  isFlagged,
+  progress,
+}: ExamTimerCardProps) {
+  const secondsRemaining = useTestSessionStore((s) => s.secondsRemaining);
+
+  return (
+    <Card style={styles.timerCard}>
+      <View style={styles.timerRow}>
+        <View style={styles.timerWrap}>
+          <Timer size={16} color={colors.primary} />
+          <Text style={styles.timerText}>{formatClock(secondsRemaining)}</Text>
+        </View>
+        <Badge
+          label={
+            isWeeklyProctored
+              ? `Warnings ${Math.min(violationCount, MAX_WARNINGS)}/${MAX_WARNINGS}`
+              : isFlagged
+              ? 'Marked for Review'
+              : 'In Progress'
+          }
+          tone={
+            isWeeklyProctored
+              ? violationCount >= MAX_WARNINGS
+                ? 'warning'
+                : 'primary'
+              : isFlagged
+              ? 'warning'
+              : 'primary'
+          }
+        />
+      </View>
+      <View style={styles.progressBar}>
+        <View style={[styles.progressFill, { width: `${progress}%` }]} />
+      </View>
+      {isWeeklyProctored ? (
+        <Text style={styles.proctoringHint}>
+          Weekly paper protection is active. Leaving the app more than 3 times will auto-submit this paper.
+        </Text>
+      ) : null}
+    </Card>
+  );
+});
 
 export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'TestAttempt'>) {
   const { testId } = route.params;
@@ -40,8 +102,9 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
   const violationCountRef = useRef(0);
   const [sessionError, setSessionError] = useState<string>();
   const [isSessionReady, setIsSessionReady] = useState(false);
-  const [violationCount, setViolationCount] = useState(0);
   const [warningMessage, setWarningMessage] = useState<string>();
+  const [violationCount, setViolationCount] = useState(0);
+  const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
 
   const user = useAuthStore((state) => state.user);
   const loadQuestions = useAppStore((state) => state.loadQuestions);
@@ -49,21 +112,18 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
   const isSubmitting = useAppStore((state) => state.isSubmitting);
   const test = useAppStore((state) => state.tests.find((candidate) => candidate.id === testId));
 
-  const {
-    questions,
-    answers,
-    flaggedQuestionIds,
-    currentIndex,
-    secondsRemaining,
-    startSession,
-    selectAnswer,
-    toggleFlag,
-    jumpTo,
-    next,
-    previous,
-    tick,
-    reset,
-  } = useTestSessionStore();
+  const questions = useTestSessionStore((s) => s.questions);
+  const answers = useTestSessionStore((s) => s.answers);
+  const flaggedQuestionIds = useTestSessionStore((s) => s.flaggedQuestionIds);
+  const currentIndex = useTestSessionStore((s) => s.currentIndex);
+  const startSession = useTestSessionStore((s) => s.startSession);
+  const selectAnswer = useTestSessionStore((s) => s.selectAnswer);
+  const clearResponse = useTestSessionStore((s) => s.clearResponse);
+  const toggleFlag = useTestSessionStore((s) => s.toggleFlag);
+  const jumpTo = useTestSessionStore((s) => s.jumpTo);
+  const next = useTestSessionStore((s) => s.next);
+  const previous = useTestSessionStore((s) => s.previous);
+  const reset = useTestSessionStore((s) => s.reset);
 
   const eligibility = test ? getEligibility(user, test) : null;
   const isWeeklyProctored = test?.type === 'weekly';
@@ -115,11 +175,40 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
     let isMounted = true;
 
     async function bootstrapSession() {
-      if (!test) {
+      let activeTest = test;
+
+      if (!activeTest) {
+        try {
+          const pdfTest = await getPdfNativeTestById(testId);
+          if (pdfTest) {
+            activeTest = mapPdfNativeTestToCbtTestItem(pdfTest);
+          }
+        } catch {
+          // Ignore
+        }
+      }
+
+      if (!activeTest) {
+        try {
+          const allTests = await fetchTests();
+          const match = allTests.find((candidate: TestItem) => candidate.id === testId);
+          if (match) {
+            activeTest = match;
+          }
+        } catch {
+          // Ignore
+        }
+      }
+
+      if (!activeTest) {
+        if (isMounted) {
+          setSessionError('Test not found or unavailable.');
+        }
         return;
       }
 
-      if (!eligibility?.allowed) {
+      const testEligibility = getEligibility(user, activeTest);
+      if (!testEligibility?.allowed) {
         if (isMounted) {
           setSessionError('You are not eligible to attempt this test.');
         }
@@ -132,27 +221,56 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
         autoSubmittedRef.current = false;
         submitInFlightRef.current = false;
 
-        const existingAttempt = await fetchExistingAttemptForTest(test.id, user?.id);
+        const existingAttempt = await fetchExistingAttemptForTest(activeTest.id, user?.id);
         if (existingAttempt) {
           navigation.replace('TestResult', {
-            testId: test.id,
+            testId: activeTest.id,
             resultId: existingAttempt.id,
           });
           return;
         }
 
-        const fetchedQuestions = await loadQuestions(test.id);
+        let fetchedQuestions = await loadQuestions(activeTest.id);
+
+        if (!fetchedQuestions || fetchedQuestions.length === 0) {
+          try {
+            const fallbackQs = await fetchPdfNativeCbtQuestions(activeTest.id);
+            if (fallbackQs && fallbackQs.length > 0) {
+              fetchedQuestions = fallbackQs;
+            }
+          } catch {
+            // Ignore
+          }
+        }
 
         if (!isMounted) {
           return;
         }
 
-        if (fetchedQuestions.length === 0) {
+        if (!fetchedQuestions || fetchedQuestions.length === 0) {
           setSessionError('No questions were available for this test.');
           return;
         }
 
-        startSession(test, fetchedQuestions);
+        // If any question is PDF-Native, load the PDF document proxy client-side for region rendering
+        const hasPdfNativeQuestion = fetchedQuestions.some((q) => q.pdfNativeBbox);
+        if (hasPdfNativeQuestion) {
+          try {
+            const firstQ = fetchedQuestions.find((q) => q.pdfUrl || q.pdfId);
+            if (firstQ) {
+              const doc = await getPdfDocument({
+                pdfId: firstQ.pdfId,
+                pdfUrl: firstQ.pdfUrl,
+              });
+              if (isMounted) setPdfDoc(doc);
+            }
+          } catch (pdfErr) {
+            console.warn('[CBT PDF LOAD] Unable to load PDF document for CBT region rendering:', pdfErr);
+          }
+        }
+
+        const resolvedStudentName = route.params?.studentName || useTestSessionStore.getState().studentName || user?.fullName || 'Student';
+        startSession(activeTest, fetchedQuestions, resolvedStudentName);
         setIsSessionReady(true);
       } catch (error) {
         if (!isMounted) {
@@ -185,16 +303,19 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
   }, [eligibility?.allowed, loadQuestions, startSession, test]);
 
   useEffect(() => {
-    if (!questions.length || secondsRemaining <= 0) {
+    if (!isSessionReady) {
       return;
     }
 
     const interval = setInterval(() => {
-      tick();
+      const state = useTestSessionStore.getState();
+      if (state.questions.length > 0 && state.secondsRemaining > 0) {
+        state.tick();
+      }
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [questions.length, secondsRemaining, tick]);
+  }, [isSessionReady]);
 
   useEffect(() => {
     let isMounted = true;
@@ -228,47 +349,102 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
     };
   }, [isWeeklyProctored, violationStorageKey]);
 
-  const handleSubmit = useCallback(async () => {
-    if (!user || !test || isSubmitting || submitInFlightRef.current) {
-      return;
-    }
+  const handleSubmit = useCallback(
+    async (isAutoSubmit = false) => {
+      if (!test || isSubmitting || submitInFlightRef.current) {
+        return;
+      }
 
-    submitInFlightRef.current = true;
+      const executeSubmit = async () => {
+        if (submitInFlightRef.current) return;
+        submitInFlightRef.current = true;
 
-    try {
-      const response = await submitAttempt({
-        testId: test.id,
-        userId: user.id,
-        answers,
-      });
+        try {
+          const activeStudentName =
+            route.params?.studentName ||
+            useTestSessionStore.getState().studentName ||
+            user?.fullName ||
+            'Student';
+          const activeUserId = user?.id || 'guest_user';
 
-      await clearViolationState();
-      reset();
-      navigation.replace('TestResult', {
-        testId: test.id,
-        resultId: response.result.id,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Please try again.';
+          const response = await submitAttempt({
+            testId: test.id,
+            userId: activeUserId,
+            answers,
+            studentName: activeStudentName,
+          });
 
-      if (message.toLowerCase().includes('already given this test.')) {
-        const existingAttempt = await fetchExistingAttemptForTest(test.id, user?.id);
-        if (existingAttempt) {
+          activityLog.logExam('EXAM_SUBMITTED', {
+            userId: activeUserId,
+            studentName: activeStudentName,
+            testId: test.id,
+            testTitle: test.title,
+            score: response.result.score,
+            status: 'success',
+          });
+          void activityLog.flush();
+
           await clearViolationState();
           reset();
           navigation.replace('TestResult', {
             testId: test.id,
-            resultId: existingAttempt.id,
+            resultId: response.result.id,
           });
-          return;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Please try again.';
+
+          if (message.toLowerCase().includes('already given this test.')) {
+            const existingAttempt = await fetchExistingAttemptForTest(test.id, user?.id);
+            if (existingAttempt) {
+              await clearViolationState();
+              reset();
+              navigation.replace('TestResult', {
+                testId: test.id,
+                resultId: existingAttempt.id,
+              });
+              return;
+            }
+          }
+
+          submitInFlightRef.current = false;
+          autoSubmittedRef.current = false;
+          Alert.alert('Submission failed', message);
         }
+      };
+
+      if (isAutoSubmit) {
+        await executeSubmit();
+        return;
       }
 
-      submitInFlightRef.current = false;
-      autoSubmittedRef.current = false;
-      Alert.alert('Submission failed', message);
-    }
-  }, [answers, clearViolationState, isSubmitting, navigation, reset, submitAttempt, test, user]);
+      Alert.alert(
+        'Submit Test',
+        'Are you sure you want to submit the test?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Submit Test',
+            onPress: () => {
+              void executeSubmit();
+            },
+          },
+        ],
+        { cancelable: true },
+      );
+    },
+    [answers, clearViolationState, isSubmitting, navigation, reset, submitAttempt, test, user],
+  );
+
+  // Auto-submit when timer reaches 0
+  useEffect(() => {
+    const unsub = useTestSessionStore.subscribe((state) => {
+      if (state.secondsRemaining === 0 && state.questions.length > 0 && !autoSubmittedRef.current) {
+        autoSubmittedRef.current = true;
+        void handleSubmit(true);
+      }
+    });
+    return unsub;
+  }, [handleSubmit]);
 
   const triggerAutoSubmit = useCallback(() => {
     if (!test || autoSubmittedRef.current) {
@@ -282,50 +458,48 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
       void logViolation({ testId: test.id, violationType: 'auto_submit' }).catch(() => undefined);
     }
 
-    void handleSubmit();
+    void handleSubmit(true);
   }, [handleSubmit, isWeeklyProctored, test]);
 
-  const handleViolation = useCallback(async (violationType: 'app_background' | 'app_inactive') => {
-    if (!isWeeklyProctored || !test || !isSessionReady || isSubmitting || submitInFlightRef.current) {
-      return;
-    }
+  const handleViolation = useCallback(
+    async (violationType: 'app_background' | 'app_inactive' | 'web_visibility' | 'web_blur') => {
+      if (!isWeeklyProctored || !test || !isSessionReady || isSubmitting || submitInFlightRef.current) {
+        return;
+      }
 
-    const now = Date.now();
-    if (now - lastViolationAtRef.current < VIOLATION_DEBOUNCE_MS) {
-      return;
-    }
-    lastViolationAtRef.current = now;
+      const now = Date.now();
+      if (now - lastViolationAtRef.current < VIOLATION_DEBOUNCE_MS) {
+        return;
+      }
+      lastViolationAtRef.current = now;
 
-    const nextCount = violationCountRef.current + 1;
-    violationCountRef.current = nextCount;
-    setViolationCount(nextCount);
+      const nextCount = violationCountRef.current + 1;
+      violationCountRef.current = nextCount;
+      setViolationCount(nextCount);
 
-    try {
-      await persistViolationCount(nextCount);
-    } catch {
-      // Best-effort persistence to survive app restarts.
-    }
+      try {
+        await persistViolationCount(nextCount);
+      } catch {
+        // Best-effort local persistence to survive app restarts.
+      }
 
-    void logViolation({ testId: test.id, violationType }).catch(() => undefined);
+      void logViolation({ testId: test.id, violationType }).catch(() => undefined);
 
-    if (nextCount <= MAX_WARNINGS) {
-      setWarningMessage(
-        nextCount === MAX_WARNINGS
-          ? `Final warning ${nextCount}/${MAX_WARNINGS}. Leaving once more will submit your paper automatically.`
-          : `Warning ${nextCount}/${MAX_WARNINGS}. Please stay inside the app during this weekly paper.`,
-      );
-      return;
-    }
+      if (nextCount < AUTO_SUBMIT_THRESHOLD) {
+        setWarningMessage(
+          nextCount === MAX_WARNINGS
+            ? `Final warning ${nextCount}/${MAX_WARNINGS}. Leaving the exam once more will submit your paper automatically.`
+            : `Warning ${nextCount}/${MAX_WARNINGS}. Please stay inside the exam screen.`,
+        );
+        return;
+      }
 
-    triggerAutoSubmit();
-  }, [isSessionReady, isSubmitting, isWeeklyProctored, persistViolationCount, test, triggerAutoSubmit]);
+      triggerAutoSubmit();
+    },
+    [isSessionReady, isSubmitting, isWeeklyProctored, persistViolationCount, test, triggerAutoSubmit],
+  );
 
-  useEffect(() => {
-    if (secondsRemaining === 0 && questions.length > 0 && !autoSubmittedRef.current) {
-      autoSubmittedRef.current = true;
-      void handleSubmit();
-    }
-  }, [handleSubmit, questions.length, secondsRemaining]);
+
 
   useEffect(() => {
     if (!isWeeklyProctored || !test || !user || !isSessionReady) {
@@ -347,7 +521,39 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
   }, [handleViolation, isSessionReady, isWeeklyProctored, test, user]);
 
   useEffect(() => {
-    if (!isWeeklyProctored || !isSessionReady || violationCount < AUTO_SUBMIT_VIOLATION || autoSubmittedRef.current) {
+    if (!isWeeklyProctored || !test || !user || !isSessionReady || Platform.OS !== 'web') {
+      return;
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.hidden || document.visibilityState === 'hidden') {
+        void handleViolation('web_visibility');
+      }
+    };
+
+    const handleWindowBlur = () => {
+      void handleViolation('web_blur');
+    };
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('blur', handleWindowBlur);
+    }
+
+    return () => {
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('blur', handleWindowBlur);
+      }
+    };
+  }, [handleViolation, isSessionReady, isWeeklyProctored, test, user]);
+
+  useEffect(() => {
+    if (!isWeeklyProctored || !isSessionReady || violationCount < AUTO_SUBMIT_THRESHOLD || autoSubmittedRef.current) {
       return;
     }
 
@@ -398,7 +604,43 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
   const isSubjectSectionTagged = !!currentQuestion?.subjectLabel?.trim();
   const currentQuestionId = currentQuestion?.id;
   const currentQuestionPrompt = currentQuestion ? formatExamTextForDisplay(currentQuestion.prompt) : '';
-  const questionIds = useMemo(() => questions.map((question) => question.id), [questions]);
+  const questionIds = useMemo(() => questions.map((question: { id: string }) => question.id), [questions]);
+
+  // Stable memoized question object for PDF-Native rendering
+  const pdfNativeQuestion = useMemo<PdfNativeQuestion | null>(() => {
+    if (!currentQuestion?.pdfNativeBbox && (!currentQuestion?.pdfNativeRegions || currentQuestion.pdfNativeRegions.length === 0)) return null;
+    return {
+      id: currentQuestion.id,
+      pdf_id: currentQuestion.pdfId || 'ref',
+      pdf_url: currentQuestion.pdfUrl,
+      question_number: String(currentIndex + 1),
+      page_start: currentQuestion.pdfNativePage || 1,
+      page_end: currentQuestion.pdfNativeRegions && currentQuestion.pdfNativeRegions.length > 0
+        ? currentQuestion.pdfNativeRegions[currentQuestion.pdfNativeRegions.length - 1]!.pageNumber
+        : currentQuestion.pdfNativePage || 1,
+      bbox: currentQuestion.pdfNativeBbox || currentQuestion.pdfNativeRegions?.[0]?.bbox || { x: 0, y: 0, width: 100, height: 100 },
+      regions: currentQuestion.pdfNativeRegions,
+      subject: (currentQuestion.subjectLabel || 'Physics') as any,
+      question_type: currentQuestion.type === 'integer' ? 'INTEGER' : 'MCQ',
+      correct_answer: null,
+      marks: 4,
+      negative_marks: 1,
+      review_status: 'APPROVED',
+    };
+  }, [
+    currentQuestion?.id,
+    currentQuestion?.pdfNativeBbox?.x,
+    currentQuestion?.pdfNativeBbox?.y,
+    currentQuestion?.pdfNativeBbox?.width,
+    currentQuestion?.pdfNativeBbox?.height,
+    currentQuestion?.pdfNativeRegions,
+    currentQuestion?.pdfId,
+    currentQuestion?.pdfUrl,
+    currentQuestion?.pdfNativePage,
+    currentQuestion?.subjectLabel,
+    currentQuestion?.type,
+    currentIndex,
+  ]);
 
   const handleTogglePalette = useCallback(() => {
     setPaletteVisible((current) => !current);
@@ -412,6 +654,13 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
     [jumpTo],
   );
 
+  const handleClearResponse = useCallback(() => {
+    if (!currentQuestionId) {
+      return;
+    }
+    clearResponse(currentQuestionId);
+  }, [clearResponse, currentQuestionId]);
+
   const handleToggleFlag = useCallback(() => {
     if (!currentQuestionId) {
       return;
@@ -424,9 +673,14 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
       if (!currentQuestionId) {
         return;
       }
-      selectAnswer(currentQuestionId, value.replace(/[^0-9-]/g, ''));
+      const sanitized = value.replace(/[^0-9-]/g, '');
+      if (!sanitized) {
+        clearResponse(currentQuestionId);
+        return;
+      }
+      selectAnswer(currentQuestionId, sanitized);
     },
-    [currentQuestionId, selectAnswer],
+    [clearResponse, currentQuestionId, selectAnswer],
   );
 
   const handleSelectAnswer = useCallback(
@@ -434,9 +688,13 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
       if (!currentQuestionId) {
         return;
       }
+      if (selectedAnswer === answer || selectedAnswer === `Option ${answer}`) {
+        clearResponse(currentQuestionId);
+        return;
+      }
       selectAnswer(currentQuestionId, answer);
     },
-    [currentQuestionId, selectAnswer],
+    [clearResponse, currentQuestionId, selectAnswer, selectedAnswer],
   );
 
   const renderQuestionContent = useCallback(() => {
@@ -445,69 +703,175 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
     }
 
     return (
-      <Animated.View entering={FadeInUp.delay(90)}>
-        <Card style={styles.questionCard}>
-          <View style={styles.questionHeader}>
-            <View style={styles.subjectWrap}>
-              <Badge label={currentSubjectLabel} tone="primary" />
-              <Text style={styles.subjectHint}>
-                {isSubjectSectionTagged ? 'Current subject section' : 'Subject section not tagged, showing test subject'}
-              </Text>
-            </View>
-            <AnimatedPressable style={styles.flagButton} onPress={handleToggleFlag}>
-              <Flag size={18} color={isFlagged ? colors.warning : colors.textMuted} />
-            </AnimatedPressable>
+      <Card style={styles.questionCard}>
+        <View style={styles.questionHeader}>
+          <View style={styles.subjectWrap}>
+            <Badge label={currentSubjectLabel} tone="primary" />
+            <Text style={styles.subjectHint}>
+              {isSubjectSectionTagged ? 'Current subject section' : 'Subject section not tagged, showing test subject'}
+            </Text>
           </View>
+          <TouchableOpacity
+            style={[styles.markReviewHeaderBtn, isFlagged && styles.markReviewHeaderBtnActive]}
+            onPress={handleToggleFlag}
+            activeOpacity={0.7}
+          >
+            <Flag size={14} color={isFlagged ? '#7C3AED' : colors.textMuted} fill={isFlagged ? '#7C3AED' : 'none'} />
+            <Text style={[styles.markReviewHeaderText, isFlagged && styles.markReviewHeaderTextActive]}>
+              {isFlagged ? 'Marked for Review ✓' : 'Mark for Review'}
+            </Text>
+          </TouchableOpacity>
+        </View>
 
-          <View style={styles.questionMetaRow}>
-            <Text style={styles.questionEyebrow}>Question {currentIndex + 1}</Text>
-            <Text style={styles.questionMeta}>{unansweredCount} left unanswered</Text>
-          </View>
+        <View style={styles.questionMetaRow}>
+          <Text style={styles.questionEyebrow}>Question {currentIndex + 1}</Text>
+          <Text style={styles.questionMeta}>{unansweredCount} left unanswered</Text>
+        </View>
 
-          <Text style={styles.questionText}>{currentQuestionPrompt}</Text>
-
-          {currentQuestion.imageUrl ? (
-            <Image source={{ uri: currentQuestion.imageUrl }} style={styles.questionImage} resizeMode="cover" />
-          ) : null}
-
-          {currentQuestion.type === 'integer' ? (
-            <View style={styles.integerCard}>
-              <Text style={styles.integerLabel}>Enter integer answer</Text>
-              <TextInput
-                keyboardType="numeric"
-                value={selectedAnswer ?? ''}
-                onChangeText={handleIntegerChange}
-                placeholder="Type your answer"
-                placeholderTextColor={colors.textSubtle}
-                style={styles.integerInput}
+        {pdfNativeQuestion ? (
+          <View style={styles.pdfNativeSection}>
+            {/* 1. Original PDF Region View (Immutable Visual Source of Truth) */}
+            <View style={styles.pdfFrame}>
+              <PdfNativePreview
+                pdfDoc={pdfDoc}
+                pdfUrl={currentQuestion.pdfUrl || pdfNativeQuestion.pdf_url}
+                question={pdfNativeQuestion}
+                showAdminDebug={false}
               />
             </View>
-          ) : (
-            <View style={styles.optionList}>
-              {currentQuestion.options.map((option, optionIndex) => (
-                <OptionCard
-                  key={`${currentQuestion.id}_${optionIndex}`}
-                  badgeLabel={String.fromCharCode(65 + optionIndex)}
-                  label={option}
-                  selected={selectedAnswer === option}
-                  onPress={() => handleSelectAnswer(option)}
+
+            {/* 2. Minimal Answer Selection Interaction Strip */}
+            {currentQuestion.type === 'integer' ? (
+              <View style={styles.integerCard}>
+                <View style={styles.integerHeaderRow}>
+                  <Text style={styles.integerLabel}>Enter numerical answer:</Text>
+                  {selectedAnswer ? (
+                    <TouchableOpacity onPress={handleClearResponse} style={styles.clearMiniBtn}>
+                      <X size={13} color={colors.danger} />
+                      <Text style={styles.clearMiniText}>Clear</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+                <TextInput
+                  keyboardType="numeric"
+                  value={selectedAnswer ?? ''}
+                  onChangeText={handleIntegerChange}
+                  placeholder="Type your numerical answer"
+                  placeholderTextColor={colors.textSubtle}
+                  style={styles.integerInput}
                 />
-              ))}
-            </View>
+              </View>
+            ) : (
+              <View style={styles.answerBubbleStrip}>
+                <View style={styles.bubbleHeaderRow}>
+                  <Text style={styles.answerStripLabel}>Select Answer Option:</Text>
+                  {selectedAnswer ? (
+                    <TouchableOpacity
+                      style={styles.clearBubbleBtn}
+                      onPress={handleClearResponse}
+                    >
+                      <X size={13} color={colors.danger} />
+                      <Text style={styles.clearBubbleText}>Unselect ({selectedAnswer.replace(/^Option\s*/i, '')})</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+                <View style={styles.bubbleRow}>
+                  {['A', 'B', 'C', 'D'].map((opt) => {
+                    const isSelected = selectedAnswer === opt || selectedAnswer === `Option ${opt}`;
+                    return (
+                      <TouchableOpacity
+                        key={opt}
+                        style={[styles.bubbleBtn, isSelected && styles.bubbleBtnSelected]}
+                        onPress={() => handleSelectAnswer(opt)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={[styles.bubbleText, isSelected && styles.bubbleTextSelected]}>
+                          ({opt})
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            )}
+          </View>
+        ) : (
+            /* Standard CBT Rendering for non-PDF-Native tests */
+            <>
+              <Text style={styles.questionText}>{currentQuestionPrompt}</Text>
+
+              {currentQuestion.imageUrl ? (
+                <Image source={{ uri: currentQuestion.imageUrl }} style={styles.questionImage} resizeMode="contain" />
+              ) : null}
+
+              {currentQuestion.type === 'integer' ? (
+                <View style={styles.integerCard}>
+                  <View style={styles.integerHeaderRow}>
+                    <Text style={styles.integerLabel}>Enter integer answer</Text>
+                    {selectedAnswer ? (
+                      <TouchableOpacity onPress={handleClearResponse} style={styles.clearMiniBtn}>
+                        <X size={13} color={colors.danger} />
+                        <Text style={styles.clearMiniText}>Clear</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                  <TextInput
+                    keyboardType="numeric"
+                    value={selectedAnswer ?? ''}
+                    onChangeText={handleIntegerChange}
+                    placeholder="Type your answer"
+                    placeholderTextColor={colors.textSubtle}
+                    style={styles.integerInput}
+                  />
+                </View>
+              ) : (
+                <View style={styles.optionList}>
+                  {currentQuestion.options.map((option: string, optionIndex: number) => {
+                    const badgeLetter = String.fromCharCode(65 + optionIndex);
+                    const isOptionSelected =
+                      selectedAnswer === option ||
+                      selectedAnswer === badgeLetter ||
+                      selectedAnswer === `Option ${badgeLetter}`;
+                    return (
+                      <OptionCard
+                        key={`${currentQuestion.id}_${optionIndex}`}
+                        badgeLabel={badgeLetter}
+                        label={option}
+                        selected={isOptionSelected}
+                        onPress={() => handleSelectAnswer(option)}
+                        imageUrl={currentQuestion.optionImageUrls?.[optionIndex]}
+                      />
+                    );
+                  })}
+                  {selectedAnswer ? (
+                    <TouchableOpacity
+                      style={styles.clearResponseInlineBtn}
+                      onPress={handleClearResponse}
+                      activeOpacity={0.7}
+                    >
+                      <X size={14} color={colors.danger} />
+                      <Text style={styles.clearResponseInlineText}>Unselect / Clear Response</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+              )}
+            </>
           )}
         </Card>
-      </Animated.View>
     );
   }, [
     currentIndex,
     currentQuestion,
     currentQuestionPrompt,
     currentSubjectLabel,
+    handleClearResponse,
     handleIntegerChange,
     handleSelectAnswer,
     handleToggleFlag,
     isFlagged,
     isSubjectSectionTagged,
+    pdfDoc,
+    pdfNativeQuestion,
     selectedAnswer,
     unansweredCount,
   ]);
@@ -560,31 +924,17 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
         }
       />
 
-      <Animated.View entering={FadeInUp.delay(40)}>
-        <Card style={styles.timerCard}>
-          <View style={styles.timerRow}>
-            <View style={styles.timerWrap}>
-              <Timer size={16} color={colors.primary} />
-              <Text style={styles.timerText}>{formatClock(secondsRemaining)}</Text>
-            </View>
-            <Badge
-              label={isWeeklyProctored ? `Warnings ${Math.min(violationCount, MAX_WARNINGS)}/${MAX_WARNINGS}` : isFlagged ? 'Flagged' : 'In Progress'}
-              tone={isWeeklyProctored ? (violationCount >= MAX_WARNINGS ? 'warning' : 'primary') : isFlagged ? 'warning' : 'primary'}
-            />
-          </View>
-          <View style={styles.progressBar}>
-            <Animated.View style={[styles.progressFill, progressStyle]} />
-          </View>
-          {isWeeklyProctored ? (
-            <Text style={styles.proctoringHint}>Weekly paper protection is active. Leaving the app more than 3 times will auto-submit this paper.</Text>
-          ) : null}
-        </Card>
-      </Animated.View>
+      <ExamTimerCard
+        isWeeklyProctored={isWeeklyProctored}
+        violationCount={violationCount}
+        isFlagged={isFlagged}
+        progress={progress}
+      />
 
       {warningMessage ? (
         <View style={[styles.warningToast, violationCount >= MAX_WARNINGS ? styles.warningToastCritical : undefined]}>
           <Text style={styles.warningToastTitle}>
-            {violationCount >= AUTO_SUBMIT_VIOLATION ? 'Auto Submit Triggered' : `Warning ${Math.min(violationCount, MAX_WARNINGS)}/${MAX_WARNINGS}`}
+            {violationCount >= AUTO_SUBMIT_THRESHOLD ? 'Auto Submit Triggered' : `Warning ${Math.min(violationCount, MAX_WARNINGS)}/${MAX_WARNINGS}`}
           </Text>
           <Text style={styles.warningToastText}>{warningMessage}</Text>
         </View>
@@ -604,15 +954,14 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
       ) : null}
 
       {!paletteVisible ? (
-        <FlatList
-          data={[currentQuestion]}
-          keyExtractor={(item) => item.id}
-          renderItem={() => renderQuestionContent()}
+        <ScrollView
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={[styles.questionListContent, { paddingBottom: spacing.md + insets.bottom }]}
+          contentContainerStyle={[styles.questionListContent, { paddingBottom: spacing.xxl + insets.bottom + 40 }]}
           style={styles.questionList}
-        />
+        >
+          {renderQuestionContent()}
+        </ScrollView>
       ) : null}
 
       <View style={[styles.footerSection, { paddingBottom: Math.max(insets.bottom, spacing.sm) + spacing.xs }]}>
@@ -624,6 +973,32 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
             onPress={previous}>
             Previous
           </Button>
+
+          {/* Dedicated Clear Button in footer */}
+          {selectedAnswer ? (
+            <TouchableOpacity
+              style={styles.footerClearBtn}
+              onPress={handleClearResponse}
+              disabled={isSubmitting}
+              activeOpacity={0.7}
+            >
+              <X size={15} color={colors.danger} />
+              <Text style={styles.footerClearText}>Clear</Text>
+            </TouchableOpacity>
+          ) : null}
+
+          {/* Mark for Review Button in footer */}
+          <TouchableOpacity
+            style={[styles.footerMarkReviewBtn, isFlagged && styles.footerMarkReviewBtnActive]}
+            onPress={handleToggleFlag}
+            disabled={isSubmitting}
+            activeOpacity={0.7}
+          >
+            <Flag size={15} color={isFlagged ? '#7C3AED' : colors.textMuted} fill={isFlagged ? '#7C3AED' : 'none'} />
+            <Text style={[styles.footerMarkReviewText, isFlagged && styles.footerMarkReviewTextActive]}>
+              {isFlagged ? 'Marked ✓' : 'Mark'}
+            </Text>
+          </TouchableOpacity>
 
           {!isLastQuestion ? (
             <Button style={styles.actionButton} onPress={next} disabled={isSubmitting}>
@@ -670,63 +1045,41 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
     flex: 1,
   },
-  iconButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 14,
-    backgroundColor: colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   timerCard: {
     gap: spacing.sm,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
   },
   timerRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: spacing.md,
-    flexWrap: 'wrap',
-    minWidth: 0,
+    justifyContent: 'space-between',
   },
   timerWrap: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    flexShrink: 1,
-    minWidth: 0,
   },
   timerText: {
-    color: colors.primary,
+    color: colors.text,
     fontSize: 16,
     fontWeight: '800',
-    flexShrink: 1,
   },
   progressBar: {
     height: 6,
-    borderRadius: 4,
     backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.pill,
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
-    borderRadius: 4,
     backgroundColor: colors.primary,
-  },
-  proctoringHint: {
-    color: colors.textMuted,
-    fontSize: 11,
-    lineHeight: 16,
+    borderRadius: radius.pill,
   },
   warningToast: {
     backgroundColor: colors.warningSoft,
-    borderRadius: radius.lg,
-    borderWidth: 1,
     borderColor: colors.warning,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    padding: spacing.md,
     gap: spacing.xs,
   },
   warningToastCritical: {
@@ -735,65 +1088,71 @@ const styles = StyleSheet.create({
   },
   warningToastTitle: {
     color: colors.text,
-    fontSize: 13,
     fontWeight: '800',
+    fontSize: 14,
   },
   warningToastText: {
     color: colors.textMuted,
     fontSize: 12,
-    lineHeight: 18,
   },
-  questionCard: {
-    gap: spacing.xl,
-    minWidth: 0,
-  },
-  questionListContent: {
-    paddingBottom: spacing.md,
-  },
-  questionList: {
-    flex: 1,
+  proctoringHint: {
+    color: colors.textSubtle,
+    fontSize: 11,
+    fontWeight: '600',
   },
   paletteSection: {
     flex: 1,
   },
+  questionList: {
+    flex: 1,
+  },
+  questionListContent: {
+    flexGrow: 1,
+  },
+  questionCard: {
+    gap: spacing.lg,
+    minWidth: 0,
+  },
   questionHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    justifyContent: 'space-between',
     gap: spacing.md,
     minWidth: 0,
   },
   subjectWrap: {
-    gap: spacing.xs,
-    minWidth: 0,
     flex: 1,
+    flexShrink: 1,
+    minWidth: 0,
+    gap: spacing.xs,
   },
   subjectHint: {
     color: colors.textMuted,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  questionMetaRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: spacing.md,
-    flexWrap: 'wrap',
-    minWidth: 0,
-  },
-  questionEyebrow: {
-    color: colors.primary,
-    fontSize: 12,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    flexShrink: 1,
-  },
-  questionMeta: {
-    color: colors.textMuted,
     fontSize: 12,
     fontWeight: '600',
-    flexShrink: 1,
+  },
+  markReviewHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  markReviewHeaderBtnActive: {
+    backgroundColor: '#EDE9FE',
+    borderColor: '#C4B5FD',
+  },
+  markReviewHeaderText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textMuted,
+  },
+  markReviewHeaderTextActive: {
+    color: '#7C3AED',
   },
   flagButton: {
     width: 42,
@@ -803,6 +1162,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
+  },
+  iconButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 16,
+    backgroundColor: colors.surfaceMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  questionMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  questionEyebrow: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  questionMeta: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
   },
   questionText: {
     color: colors.text,
@@ -814,12 +1199,31 @@ const styles = StyleSheet.create({
   },
   questionImage: {
     width: '100%',
-    height: 180,
+    height: 360,
+    maxHeight: 560,
     borderRadius: radius.lg,
     backgroundColor: colors.surfaceMuted,
   },
   optionList: {
     gap: spacing.md,
+  },
+  clearResponseInlineBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: radius.md,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    marginTop: spacing.xs,
+  },
+  clearResponseInlineText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.danger,
   },
   integerCard: {
     gap: spacing.sm,
@@ -827,6 +1231,25 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     padding: spacing.lg,
     minWidth: 0,
+  },
+  integerHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  clearMiniBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: radius.sm,
+    backgroundColor: '#FEE2E2',
+  },
+  clearMiniText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.danger,
   },
   integerLabel: {
     color: colors.textMuted,
@@ -847,7 +1270,7 @@ const styles = StyleSheet.create({
   },
   footerActions: {
     flexDirection: 'row',
-    gap: spacing.md,
+    gap: spacing.sm,
     minWidth: 0,
   },
   footerSection: {
@@ -864,6 +1287,47 @@ const styles = StyleSheet.create({
   secondaryButtonDisabled: {
     opacity: 0.55,
   },
+  footerClearBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingHorizontal: 14,
+    minHeight: 44,
+    borderRadius: radius.md,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  footerClearText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.danger,
+  },
+  footerMarkReviewBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    minHeight: 44,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  footerMarkReviewBtnActive: {
+    backgroundColor: '#EDE9FE',
+    borderColor: '#C4B5FD',
+  },
+  footerMarkReviewText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textMuted,
+  },
+  footerMarkReviewTextActive: {
+    color: '#7C3AED',
+  },
   exitButton: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -876,5 +1340,79 @@ const styles = StyleSheet.create({
   },
   recoveryButton: {
     minHeight: 54,
+  },
+  pdfNativeSection: {
+    gap: spacing.md,
+  },
+  pdfFrame: {
+    minHeight: 240,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: '#FFFFFF',
+  },
+  answerBubbleStrip: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 10,
+    padding: spacing.md,
+    gap: spacing.xs,
+  },
+  bubbleHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  answerStripLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+  },
+  bubbleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  bubbleBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 2,
+    borderColor: '#CBD5E1',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  bubbleBtnSelected: {
+    borderColor: '#15803D',
+    backgroundColor: '#DCFCE7',
+  },
+  bubbleText: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  bubbleTextSelected: {
+    color: '#15803D',
+  },
+  clearBubbleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: '#FEE2E2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  clearBubbleText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.danger,
   },
 });

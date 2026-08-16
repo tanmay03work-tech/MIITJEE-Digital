@@ -3,6 +3,7 @@ import { Alert, Image, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { Eye, EyeOff, GraduationCap, Shield, UserRound, WifiOff } from 'lucide-react-native';
 
+import miitjeeLogo from '../../assets/branding/miitjee-logo.png';
 import { AnimatedPressable } from '../../components/common/AnimatedPressable';
 import { Button } from '../../components/common/Button';
 import { EmptyState } from '../../components/common/EmptyState';
@@ -48,24 +49,12 @@ export function AuthScreen() {
       if (mode === 'signin') {
         setLastAttempt('signin');
         await signIn({ email, password });
-        return;
+      } else {
+        setLastAttempt('signup');
+        await signUp({ fullName, email, password, requestedRole });
       }
-
-      if (!fullName.trim()) {
-        Alert.alert('Name required', 'Please enter your full name to continue.');
-        return;
-      }
-
-      setLastAttempt('signup');
-      await signUp({
-        fullName: fullName.trim(),
-        email,
-        password,
-        requestedRole,
-      });
-    } catch (submissionError) {
-      const message = submissionError instanceof Error ? submissionError.message : 'Unable to complete sign in.';
-      Alert.alert('Unable to continue', message);
+    } catch {
+      // Auth store state is bound to UI
     }
   };
 
@@ -73,25 +62,9 @@ export function AuthScreen() {
     try {
       setLastAttempt('google');
       await signInWithGoogle();
-      Alert.alert(
-        'Continue in Browser',
-        'Complete your Google sign-in in the browser. You will return to the app automatically.',
-      );
-    } catch (submissionError) {
-      const message = submissionError instanceof Error ? submissionError.message : 'Google sign-in failed.';
-      Alert.alert('Unable to continue', message);
+    } catch {
+      // Auth store state is bound to UI
     }
-  };
-
-  const handleRetry = async () => {
-    clearError();
-
-    if (lastAttempt === 'google') {
-      await handleGoogleSignIn();
-      return;
-    }
-
-    await handleSubmit();
   };
 
   if (errorKind === 'network') {
@@ -99,27 +72,30 @@ export function AuthScreen() {
       <Screen contentContainerStyle={styles.offlineContent}>
         <View style={styles.offlineHero}>
           <View style={styles.offlineBadge}>
-            <WifiOff size={22} color={colors.primary} />
-            <Text style={styles.offlineBadgeText}>Connection problem</Text>
+            <WifiOff size={16} color={colors.primary} />
+            <Text style={styles.offlineBadgeText}>Offline Mode</Text>
           </View>
-          <Text style={styles.offlineTitle}>We could not reach MIITJEE right now</Text>
+          <Text style={styles.offlineTitle}>Unable to connect to MIITJEE</Text>
           <Text style={styles.offlineSubtitle}>
-            Your internet seems offline or unstable. Reconnect and try signing in again.
+            Check your internet connection or try again. Offline mode will keep cached tests and results available where supported.
           </Text>
         </View>
 
-        <EmptyState
-          icon={WifiOff}
-          title="Offline or network issue"
-          description={error ?? 'Please check your internet connection and retry.'}
-        />
-
         <View style={styles.offlineActions}>
-          <Button onPress={() => void handleRetry()} loading={isLoading}>
-            Try Again
+          <Button
+            variant="primary"
+            onPress={() => {
+              clearError();
+              if (lastAttempt === 'google') {
+                void handleGoogleSignIn();
+              } else if (lastAttempt === 'signin' || lastAttempt === 'signup') {
+                void handleSubmit();
+              }
+            }}>
+            Retry Connection
           </Button>
-          <Button variant="secondary" onPress={clearError} disabled={isLoading}>
-            Back To Login
+          <Button variant="ghost" onPress={() => clearError()}>
+            Dismiss
           </Button>
         </View>
       </Screen>
@@ -130,7 +106,7 @@ export function AuthScreen() {
     <Screen contentContainerStyle={styles.content}>
       <Animated.View entering={FadeInDown.duration(400)} style={styles.hero}>
         <View style={styles.logoWrap}>
-          <Image source={require('../../assets/branding/miitjee-logo.png')} style={styles.logoImage} resizeMode="contain" />
+          <Image source={miitjeeLogo} style={styles.logoImage} resizeMode="contain" />
         </View>
         <Text style={styles.heroHeadline}>Digital learning for serious exam preparation</Text>
         <Text style={styles.heroEyebrow}>Batches, papers, insights, and scholarship journeys in one platform</Text>

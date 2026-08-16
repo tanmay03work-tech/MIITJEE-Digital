@@ -9,6 +9,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import miitjeeLogo from '../../assets/branding/miitjee-logo.png';
 import { colors, radius, spacing } from '../../theme';
 
 interface BrandLoadingStateProps {
@@ -47,7 +48,7 @@ function BrandLoadingStateComponent({
   return (
     <View style={[styles.container, variant === 'overlay' ? styles.containerOverlay : styles.containerScreen]}>
       <View style={[styles.panel, variant === 'overlay' ? styles.panelOverlay : styles.panelScreen]}>
-        <Image source={require('../../assets/branding/miitjee-logo.png')} style={styles.logo} resizeMode="contain" />
+        <Image source={miitjeeLogo} style={styles.logo} resizeMode="contain" />
         <View style={styles.copyWrap}>
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.subtitle}>{subtitle}</Text>

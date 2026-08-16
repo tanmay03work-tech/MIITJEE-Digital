@@ -42,21 +42,21 @@ function QuestionPaletteSheetComponent({
         <View style={styles.header}>
           <Text style={styles.title}>Question Palette</Text>
           <Text style={styles.subtitle}>
-            {answeredCount} answered, {unansweredCount} unanswered, {flaggedCount} flagged
+            {answeredCount} Answered • {unansweredCount} Unanswered • {flaggedCount} Marked for Review
           </Text>
         </View>
         <View style={styles.legend}>
           <View style={styles.legendItem}>
             <View style={[styles.legendDot, styles.itemAnswered]} />
-            <Text style={styles.legendLabel}>Answered</Text>
+            <Text style={styles.legendLabel}>Answered ({answeredCount})</Text>
           </View>
           <View style={styles.legendItem}>
             <View style={[styles.legendDot, styles.itemUnanswered]} />
-            <Text style={styles.legendLabel}>Unanswered</Text>
+            <Text style={styles.legendLabel}>Unanswered ({unansweredCount})</Text>
           </View>
           <View style={styles.legendItem}>
             <View style={[styles.legendDot, styles.itemFlagged]} />
-            <Text style={styles.legendLabel}>Flagged</Text>
+            <Text style={styles.legendLabel}>Marked for Review ({flaggedCount})</Text>
           </View>
         </View>
         <ScrollView style={styles.gridScroll} contentContainerStyle={styles.grid} showsVerticalScrollIndicator={false}>
@@ -65,16 +65,20 @@ function QuestionPaletteSheetComponent({
             const isCurrent = currentIndex === index;
             const isAnswered = !!(questionId && answers[questionId]);
             const isFlagged = !!(questionId && flaggedQuestionIdSet.has(questionId));
-            const paletteStyle = isFlagged
-              ? styles.itemFlagged
-              : isAnswered
-                ? styles.itemAnswered
-                : styles.itemUnanswered;
-            const textStyle = isFlagged
-              ? styles.itemTextFlagged
-              : isAnswered
-                ? styles.itemTextAnswered
-                : styles.itemTextUnanswered;
+
+            let paletteStyle = styles.itemUnanswered;
+            let textStyle = styles.itemTextUnanswered;
+
+            if (isFlagged && isAnswered) {
+              paletteStyle = styles.itemAnsweredAndFlagged;
+              textStyle = styles.itemTextFlagged;
+            } else if (isFlagged) {
+              paletteStyle = styles.itemFlagged;
+              textStyle = styles.itemTextFlagged;
+            } else if (isAnswered) {
+              paletteStyle = styles.itemAnswered;
+              textStyle = styles.itemTextAnswered;
+            }
 
             return (
               <AnimatedPressable
@@ -88,6 +92,9 @@ function QuestionPaletteSheetComponent({
                 <Text style={[styles.itemText, textStyle, isCurrent && styles.itemTextCurrent]}>
                   {index + 1}
                 </Text>
+                {isFlagged && isAnswered ? (
+                  <View style={styles.answeredDotBadge} />
+                ) : null}
               </AnimatedPressable>
             );
           })}
@@ -157,40 +164,58 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: 'transparent',
+    position: 'relative',
   },
   itemCurrent: {
     borderColor: colors.primary,
     shadowColor: colors.primary,
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.25,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
-    elevation: 3,
+    elevation: 4,
   },
   itemAnswered: {
-    backgroundColor: colors.successSoft,
+    backgroundColor: '#DCFCE7',
+    borderColor: '#86EFAC',
   },
   itemUnanswered: {
-    backgroundColor: colors.dangerSoft,
+    backgroundColor: '#F1F5F9',
+    borderColor: '#E2E8F0',
   },
   itemFlagged: {
-    backgroundColor: colors.warningSoft,
+    backgroundColor: '#EDE9FE',
+    borderColor: '#C4B5FD',
+  },
+  itemAnsweredAndFlagged: {
+    backgroundColor: '#EDE9FE',
+    borderColor: '#15803D',
+    borderWidth: 2,
+  },
+  answeredDotBadge: {
+    position: 'absolute',
+    top: 3,
+    right: 3,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#15803D',
   },
   itemText: {
     fontSize: 14,
     fontWeight: '800',
   },
   itemTextAnswered: {
-    color: colors.success,
+    color: '#15803D',
   },
   itemTextUnanswered: {
-    color: colors.danger,
+    color: '#64748B',
   },
   itemTextFlagged: {
-    color: colors.warning,
+    color: '#7C3AED',
   },
   itemTextCurrent: {
-    color: colors.white,
+    color: colors.primary,
   },
 });

@@ -70,12 +70,6 @@ function patchCMake() {
     'file(GLOB_RECURSE REANIMATED_ANDROID_CPP_SOURCES CONFIGURE_DEPENDS',
     'file(GLOB_RECURSE REANIMATED_ANDROID_CPP_SOURCES',
   );
-  if (!updated.includes('TransformMatrix3D.cpp"\n    PROPERTIES COMPILE_FLAGS')) {
-    updated = updated.replace(
-      'find_package(fbjni REQUIRED CONFIG)\n',
-      `${transformMatrixWindowsReleasePatch}find_package(fbjni REQUIRED CONFIG)\n`,
-    );
-  }
   if (!updated.includes('Work around NDK clang crashes on Windows')) {
     updated = updated.replace(
       'string(APPEND CMAKE_CXX_FLAGS " -fno-omit-frame-pointer -fstack-protector-all")',

@@ -5,25 +5,96 @@ import { Trophy } from 'lucide-react-native';
 
 import { AppHeader } from '../../components/common/AppHeader';
 import { Badge } from '../../components/common/Badge';
+import { BrandLoadingState } from '../../components/common/BrandLoadingState';
 import { Button } from '../../components/common/Button';
 import { Card } from '../../components/common/Card';
 import { Screen } from '../../components/common/Screen';
 import { RootStackScreenProps } from '../../navigation/types';
+import { fetchExistingAttemptForTest, fetchResultById } from '../../services/api/tests';
 import { useAppStore } from '../../store/appStore';
+import { useAuthStore } from '../../store/authStore';
 import { colors, spacing } from '../../theme';
-import { LeaderboardEntry } from '../../types';
+import { LeaderboardEntry, TestResult } from '../../types';
 
 const EMPTY_LEADERBOARD: LeaderboardEntry[] = [];
 
 export function TestResultScreen({ route, navigation }: RootStackScreenProps<'TestResult'>) {
   const { resultId, testId } = route.params;
-  const result = useAppStore((state) => state.results.find((entry) => entry.id === resultId));
+  const storeResult = useAppStore((state) =>
+    state.results.find((entry) => entry.id === resultId || entry.id === route.params?.resultId)
+    || state.results.find((entry) => entry.testId === testId)
+  );
+  const [fetchedResult, setFetchedResult] = useState<TestResult | null>(null);
+  const result = storeResult || fetchedResult;
+  const [isResultLoading, setIsResultLoading] = useState<boolean>(!result);
   const storedLeaderboard = useAppStore((state) => state.testLeaderboards[testId]);
   const loadLeaderboard = useAppStore((state) => state.loadLeaderboard);
   const test = useAppStore((state) => state.tests.find((candidate) => candidate.id === testId));
   const [leaderboardError, setLeaderboardError] = useState<string>();
   const [isLeaderboardLoading, setIsLeaderboardLoading] = useState(false);
   const leaderboard = storedLeaderboard ?? EMPTY_LEADERBOARD;
+
+  const loadReview = useAppStore((state) => state.loadReview);
+  const [subjectBreakdown, setSubjectBreakdown] = useState<Array<{ subject: string; correct: number; wrong: number; unattempted: number; score: number; total: number }>>([]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadSubjectBreakdown() {
+      if (!resultId) return;
+      try {
+        const reviews = await loadReview(resultId);
+        if (!active || !reviews.length) return;
+
+        const breakdownMap: Record<string, { correct: number; wrong: number; unattempted: number; score: number; total: number }> = {};
+
+        reviews.forEach((item) => {
+          const sub = (test?.subject || 'General Section').trim();
+          if (!breakdownMap[sub]) {
+            breakdownMap[sub] = { correct: 0, wrong: 0, unattempted: 0, score: 0, total: 0 };
+          }
+          breakdownMap[sub].total += 1;
+
+          const ans = (item.userAnswer || '').trim();
+          if (ans === '') {
+            breakdownMap[sub].unattempted += 1;
+          } else if (item.isCorrect) {
+            breakdownMap[sub].correct += 1;
+          } else {
+            breakdownMap[sub].wrong += 1;
+          }
+        });
+
+        Object.keys(breakdownMap).forEach((key) => {
+          const b = breakdownMap[key];
+          if (b) {
+            b.score = b.correct * (test?.correctMarks ?? 4) - b.wrong * Math.abs(test?.wrongMarks ?? 1);
+          }
+        });
+
+        const list = Object.keys(breakdownMap).map((key) => {
+          const entry = breakdownMap[key];
+          return {
+            subject: key,
+            correct: entry?.correct ?? 0,
+            wrong: entry?.wrong ?? 0,
+            unattempted: entry?.unattempted ?? 0,
+            score: entry?.score ?? 0,
+            total: entry?.total ?? 0,
+          };
+        });
+
+        setSubjectBreakdown(list);
+      } catch {
+        // Fallback to empty breakdown list
+      }
+    }
+
+    void loadSubjectBreakdown();
+    return () => {
+      active = false;
+    };
+  }, [loadReview, resultId, test?.correctMarks, test?.subject, test?.wrongMarks]);
 
   useEffect(() => {
     let active = true;
@@ -62,6 +133,55 @@ export function TestResultScreen({ route, navigation }: RootStackScreenProps<'Te
     };
   }, [leaderboard.length, loadLeaderboard, testId]);
 
+  useEffect(() => {
+    let active = true;
+
+    if (result) {
+      setIsResultLoading(false);
+      return;
+    }
+
+    async function loadMissingResult() {
+      try {
+        setIsResultLoading(true);
+        let loaded = resultId ? await fetchResultById(resultId) : null;
+
+        if (!loaded && testId) {
+          const user = useAuthStore.getState().user;
+          loaded = await fetchExistingAttemptForTest(testId, user?.id);
+        }
+
+        if (active) {
+          if (loaded) {
+            setFetchedResult(loaded);
+            useAppStore.setState((state) => ({
+              results: [loaded!, ...state.results.filter((entry) => entry.id !== loaded!.id)],
+            }));
+          }
+          setIsResultLoading(false);
+        }
+      } catch {
+        if (active) {
+          setIsResultLoading(false);
+        }
+      }
+    }
+
+    void loadMissingResult();
+    return () => {
+      active = false;
+    };
+  }, [result, resultId, testId]);
+
+  if (isResultLoading) {
+    return (
+      <Screen contentContainerStyle={styles.content}>
+        <AppHeader title="Result" subtitle="Loading scorecard..." />
+        <BrandLoadingState title="Loading Scorecard" subtitle="Retrieving your test result and performance metrics." />
+      </Screen>
+    );
+  }
+
   if (!result) {
     return (
       <Screen contentContainerStyle={styles.content}>
@@ -70,6 +190,9 @@ export function TestResultScreen({ route, navigation }: RootStackScreenProps<'Te
     );
   }
 
+  const wrongCount = result.wrongAnswers ?? Math.max(0, result.totalQuestions - result.correctAnswers - (result.unattempted ?? 0));
+  const unattemptedCount = result.unattempted ?? Math.max(0, result.totalQuestions - result.correctAnswers - wrongCount);
+
   return (
     <Screen contentContainerStyle={styles.content}>
       <AppHeader title="Result" subtitle={test?.title ?? 'Latest submission'} />
@@ -77,8 +200,8 @@ export function TestResultScreen({ route, navigation }: RootStackScreenProps<'Te
       <Animated.View entering={ZoomIn.duration(450)} style={styles.scoreWrap}>
         <View style={styles.scoreRingOuter}>
           <View style={styles.scoreRingInner}>
-            <Text style={styles.scoreValue}>{result.score}%</Text>
-            <Text style={styles.scoreLabel}>Score</Text>
+            <Text style={styles.scoreValue}>{result.score}</Text>
+            <Text style={styles.scoreLabel}>Score (Marks)</Text>
           </View>
         </View>
       </Animated.View>
@@ -86,7 +209,9 @@ export function TestResultScreen({ route, navigation }: RootStackScreenProps<'Te
       <Animated.View entering={FadeInDown.delay(40)}>
         <Card style={styles.summaryCard}>
           <Text style={styles.summaryEyebrow}>Result Summary</Text>
-          <Text style={styles.summaryTitle}>You have completed this paper successfully.</Text>
+          <Text style={styles.summaryTitle}>
+            {result.studentName ? `${result.studentName}, you have completed this paper successfully.` : 'You have completed this paper successfully.'}
+          </Text>
           <Text style={styles.summaryText}>
             Your score, rank, and review sheet are ready. Use this summary to identify the next area to improve.
           </Text>
@@ -99,6 +224,14 @@ export function TestResultScreen({ route, navigation }: RootStackScreenProps<'Te
           <Text style={styles.metricValue}>
             {result.correctAnswers}/{result.totalQuestions}
           </Text>
+        </Card>
+        <Card style={styles.metricCard}>
+          <Text style={styles.metricLabel}>Wrong</Text>
+          <Text style={styles.metricValue}>{wrongCount}</Text>
+        </Card>
+        <Card style={styles.metricCard}>
+          <Text style={styles.metricLabel}>Unattempted</Text>
+          <Text style={styles.metricValue}>{unattemptedCount}</Text>
         </Card>
         <Card style={styles.metricCard}>
           <Text style={styles.metricLabel}>Rank</Text>

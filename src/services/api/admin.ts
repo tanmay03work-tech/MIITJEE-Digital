@@ -1,4 +1,5 @@
 import {
+  ActivityLogEntry,
   AnalyticsSnapshot,
   AutoSubmitEvent,
   AppUser,
@@ -21,10 +22,22 @@ import {
 } from '../../types';
 import { appEnv, assertWorkerConfig } from '../../config/env';
 import { endpoints } from './config';
-import { getAuthenticatedAccessToken, rpc, selectRows } from '../supabase/client';
-import { mapAnalytics, mapAutoSubmitEvent, mapBatch, mapEnquiry, mapEnrollmentQuery, mapProfile, mapQuestionAnalytics, mapResult, mapScholarshipRegistration, mapStudentAnalytics, mapTest, mapTestAnalytics, mapViolationSummary } from '../supabase/mappers';
-import { AnalyticsRow, AutoSubmitEventRow, BatchRow, EnquiryRow, EnrollmentQueryRow, ProfileRow, QuestionAnalyticsRow, ResultRow, ScholarshipRegistrationRow, StudentAnalyticsRow, TestAnalyticsRow, TestRow, ViolationSummaryRow } from '../supabase/types';
+import { deleteRows, getAuthenticatedAccessToken, rpc, selectRows } from '../supabase/client';
+import { mapActivityLog, mapAnalytics, mapAutoSubmitEvent, mapBatch, mapEnquiry, mapEnrollmentQuery, mapProfile, mapQuestionAnalytics, mapResult, mapScholarshipRegistration, mapStudentAnalytics, mapTest, mapTestAnalytics, mapViolationSummary, normalizeAssetUrl } from '../supabase/mappers';
+import { ActivityLogRow, AnalyticsRow, AutoSubmitEventRow, BatchRow, EnquiryRow, EnrollmentQueryRow, ProfileRow, QuestionAnalyticsRow, ResultRow, ScholarshipRegistrationRow, StudentAnalyticsRow, TestAnalyticsRow, TestRow, ViolationSummaryRow } from '../supabase/types';
 import { coerceDurationMinutes } from '../../utils/formatters';
+import {
+  deletePdfNativeTest,
+  getPdfNativeTestById,
+  listPdfNativeTests,
+  publishPdfNativeTest,
+  updatePdfNativeTest,
+} from '../pdf-native/pdfNativeTestService';
+import { mapPdfNativeTestToCbtTestItem } from '../pdf-native/pdfNativeCbtAdapter';
+import {
+  getLocalPdfNativeAttempts,
+  getLocalPdfNativeTestQuestions,
+} from '../pdf-native/pdfNativeLocalStorage';
 
 const DEFAULT_PAGE_SIZE = 20;
 const PAGE_CACHE_TTL_MS = 45_000;
@@ -109,24 +122,53 @@ async function workerRequest<T>(pathname: string, init?: RequestInit) {
   }
 
   const normalizedPath = pathname.startsWith('/') ? pathname : `/${pathname}`;
-  const response = await fetch(`${appEnv.workerBaseUrl}${normalizedPath}`, {
-    ...init,
-    headers,
-  });
+  const primaryUrl = `${appEnv.workerBaseUrl}${normalizedPath}`;
+  const fallbackBase = 'https://miitjee-backend.miitjee-api.workers.dev';
 
-  if (!response.ok) {
-    let message = 'Worker request failed.';
-    try {
-      const body = (await response.json()) as { error?: string; message?: string };
-      message = body.error ?? body.message ?? message;
-    } catch {
-      message = response.statusText || message;
+  try {
+    const response = await fetch(primaryUrl, {
+      ...init,
+      headers,
+    });
+
+    if (!response.ok) {
+      let message = 'Worker request failed.';
+      try {
+        const body = (await response.json()) as { error?: string; message?: string };
+        message = body.error ?? body.message ?? message;
+      } catch {
+        message = response.statusText || message;
+      }
+
+      throw new Error(message);
     }
 
-    throw new Error(message);
-  }
+    return (await response.json()) as T;
+  } catch (err) {
+    if (appEnv.workerBaseUrl !== fallbackBase && (err instanceof TypeError || (err instanceof Error && err.message.includes('fetch')))) {
+      console.warn(`[workerRequest] Primary worker request failed (${primaryUrl}), trying fallback (${fallbackBase}${normalizedPath}):`, err);
+      const fallbackUrl = `${fallbackBase}${normalizedPath}`;
+      const response = await fetch(fallbackUrl, {
+        ...init,
+        headers,
+      });
 
-  return (await response.json()) as T;
+      if (!response.ok) {
+        let message = 'Worker request failed.';
+        try {
+          const body = (await response.json()) as { error?: string; message?: string };
+          message = body.error ?? body.message ?? message;
+        } catch {
+          message = response.statusText || message;
+        }
+
+        throw new Error(message);
+      }
+
+      return (await response.json()) as T;
+    }
+    throw err;
+  }
 }
 
 export async function fetchUsersPage(options?: PageOptions): Promise<AppUser[]> {
@@ -161,7 +203,7 @@ export async function fetchUsers(options?: PageOptions): Promise<AppUser[]> {
 }
 
 export async function fetchAdminTestsPage(options?: PageOptions): Promise<TestItem[]> {
-  const cacheKey = `tests:${options?.offset ?? 0}:${options?.limit ?? DEFAULT_PAGE_SIZE}`;
+  const cacheKey = `tests:${options?.offset ?? 0}:${options?.limit ?? DEFAULT_PAGE_SIZE}:${options?.search ?? ''}`;
   const cached = getCachedRows<TestItem>(cacheKey);
   if (cached) {
     return cached;
@@ -169,15 +211,37 @@ export async function fetchAdminTestsPage(options?: PageOptions): Promise<TestIt
 
   const pageQuery = buildPageQuery(options);
 
-  const rows = await selectRows<TestRow>(
-    endpoints.tests.list,
-    'id,title,description,duration_minutes,question_count,batch_id,type,subject,scheduled_at,is_published,is_started,started_at,scholarship_admission_class,scholarship_target_exam',
-    {
-      order: 'scheduled_at.asc',
-      ...pageQuery,
-    },
-  );
-  const mappedRows = rows.map(mapTest);
+  let mappedRows: TestItem[] = [];
+  try {
+    const rows = await selectRows<TestRow>(
+      endpoints.tests.list,
+      'id,title,description,duration_minutes,question_count,batch_id,type,subject,scheduled_at,is_published,is_started,started_at,scholarship_admission_class,scholarship_target_exam',
+      {
+        order: 'scheduled_at.asc',
+        ...pageQuery,
+      },
+    );
+    mappedRows = rows.map(mapTest);
+  } catch (err) {
+    console.warn('[fetchAdminTestsPage] Standard tests query fallback:', err);
+  }
+
+  // Include PDF-Native tests in admin tests list
+  try {
+    const pdfNativeRaw = await listPdfNativeTests();
+    const pdfNativeItems = pdfNativeRaw.map(mapPdfNativeTestToCbtTestItem);
+    mappedRows = [...mappedRows, ...pdfNativeItems];
+  } catch (err) {
+    console.warn('[fetchAdminTestsPage] Error loading PDF-Native tests:', err);
+  }
+
+  if (options?.search) {
+    const q = options.search.toLowerCase();
+    mappedRows = mappedRows.filter(
+      (t) => t.title.toLowerCase().includes(q) || (t.description && t.description.toLowerCase().includes(q))
+    );
+  }
+
   setCachedRows(cacheKey, mappedRows);
   return mappedRows;
 }
@@ -190,38 +254,113 @@ export async function fetchResultsPage(userId?: string, options?: PageOptions): 
   }
 
   const pageQuery = buildPageQuery(options);
+  let mappedRows: TestResult[] = [];
   try {
     const rows = await selectRows<ResultRow>(
       endpoints.admin.results,
-      'id,test_id,user_id,score,correct_answers,total_questions,rank,percentile,submitted_at',
+      'id,test_id,user_id,student_name,score,correct_answers,wrong_answers,unattempted,total_questions,rank,percentile,submitted_at',
       {
         ...(userId ? { user_id: `eq.${userId}` } : {}),
         order: 'submitted_at.desc',
         ...pageQuery,
       },
     );
-    const mappedRows = rows.map(mapResult);
-    setCachedRows(cacheKey, mappedRows);
-    return mappedRows;
+    mappedRows = rows.map(mapResult);
   } catch {
-    const directRows = await selectRows<
-      Omit<ResultRow, 'rank'> & {
-        rank?: number | null;
-      }
-    >('test_attempts', 'id,test_id,user_id,score,correct_answers,total_questions,percentile,submitted_at', {
+    try {
+      const directRows = await selectRows<
+        Omit<ResultRow, 'rank'> & {
+          rank?: number | null;
+        }
+      >('test_attempts', 'id,test_id,user_id,student_name,score,correct_answers,wrong_answers,unattempted,total_questions,percentile,submitted_at', {
+        ...(userId ? { user_id: `eq.${userId}` } : {}),
+        order: 'submitted_at.desc',
+        ...pageQuery,
+      });
+      mappedRows = directRows.map((row) =>
+        mapResult({
+          ...row,
+          rank: row.rank ?? 0,
+        } as ResultRow),
+      );
+    } catch {
+      mappedRows = [];
+    }
+  }
+
+  // Merge Supabase PDF-Native test attempts
+  try {
+    const pdfRows = await selectRows<{
+      id: string;
+      test_id: string;
+      user_id: string | null;
+      student_name: string | null;
+      total_score: number | null;
+      score: number | null;
+      correct_count: number;
+      wrong_count: number;
+      unattempted_count: number;
+      total_questions: number;
+      created_at: string;
+    }>('pdf_native_attempts', '*', {
       ...(userId ? { user_id: `eq.${userId}` } : {}),
-      order: 'submitted_at.desc',
+      order: 'created_at.desc',
       ...pageQuery,
     });
-    const mappedRows = directRows.map((row) =>
-      mapResult({
-        ...row,
-        rank: row.rank ?? 0,
-      } as ResultRow),
-    );
-    setCachedRows(cacheKey, mappedRows);
-    return mappedRows;
+
+    for (const a of pdfRows) {
+      if (!mappedRows.some((r) => r.id === a.id)) {
+        mappedRows.push({
+          id: a.id,
+          testId: a.test_id,
+          userId: a.user_id || userId || 'guest_user',
+          studentName: a.student_name || 'Student',
+          score: a.total_score ?? a.score ?? 0,
+          correctAnswers: a.correct_count,
+          wrongAnswers: a.wrong_count,
+          unattempted: a.unattempted_count,
+          totalQuestions: a.total_questions,
+          rank: 1,
+          percentile: 100,
+          submittedAt: a.created_at || new Date().toISOString(),
+          isPdfNative: true,
+        });
+      }
+    }
+  } catch (err) {
+    // Only on network error, merge local guest attempts
+    try {
+      const localPdfAttempts = await getLocalPdfNativeAttempts();
+      const filteredPdfAttempts = userId
+        ? localPdfAttempts.filter((a) => a.user_id === userId)
+        : localPdfAttempts;
+
+      for (const a of filteredPdfAttempts) {
+        if (!mappedRows.some((r) => r.id === a.id)) {
+          mappedRows.push({
+            id: a.id,
+            testId: a.test_id,
+            userId: a.user_id || userId || 'guest_user',
+            studentName: a.student_name || 'Student',
+            score: a.total_score,
+            correctAnswers: a.correct_count,
+            wrongAnswers: a.wrong_count,
+            unattempted: a.unattempted_count,
+            totalQuestions: a.total_questions,
+            rank: 1,
+            percentile: 100,
+            submittedAt: a.created_at || new Date().toISOString(),
+            isPdfNative: true,
+          });
+        }
+      }
+    } catch {
+      // Ignore
+    }
   }
+
+  setCachedRows(cacheKey, mappedRows);
+  return mappedRows;
 }
 
 export async function fetchResults(userId?: string, options?: PageOptions): Promise<TestResult[]> {
@@ -231,43 +370,120 @@ export async function fetchResults(userId?: string, options?: PageOptions): Prom
 export async function createTest(payload: CreateTestPayload): Promise<TestItem> {
   const safeDurationMinutes = coerceDurationMinutes(payload.durationMinutes);
 
-  const row = await rpc<TestRow>(endpoints.admin.createTest, {
-    p_title: payload.title,
-    p_description: payload.description,
-    p_duration_minutes: safeDurationMinutes,
-    p_batch_id: payload.batchId ?? null,
-    p_type: payload.type,
-    p_subject: payload.subject,
-    p_scholarship_admission_class: payload.scholarshipAdmissionClass ?? null,
-    p_scholarship_target_exam: payload.scholarshipTargetExam ?? null,
-    p_questions: payload.questions,
-    p_scheduled_at: payload.scheduledAt,
-  });
-  invalidateAdminCache();
-  return mapTest(row);
+  try {
+    const row = await rpc<TestRow>(endpoints.admin.createTest, {
+      p_title: payload.title,
+      p_description: payload.description,
+      p_duration_minutes: safeDurationMinutes,
+      p_batch_id: payload.batchId ?? null,
+      p_type: payload.type,
+      p_subject: payload.subject,
+      p_scholarship_admission_class: payload.scholarshipAdmissionClass ?? null,
+      p_scholarship_target_exam: payload.scholarshipTargetExam ?? null,
+      p_questions: payload.questions,
+      p_scheduled_at: payload.scheduledAt,
+      p_is_open_for_all: payload.isOpenForAll ?? false,
+    });
+    invalidateAdminCache();
+    return mapTest(row);
+  } catch (error) {
+    const message = error instanceof Error ? error.message.toLowerCase() : '';
+    if (message.includes('parameter') || message.includes('function') || message.includes('schema cache')) {
+      const row = await rpc<TestRow>(endpoints.admin.createTest, {
+        p_title: payload.title,
+        p_description: payload.description,
+        p_duration_minutes: safeDurationMinutes,
+        p_batch_id: payload.batchId ?? null,
+        p_type: payload.type,
+        p_subject: payload.subject,
+        p_scholarship_admission_class: payload.scholarshipAdmissionClass ?? null,
+        p_scholarship_target_exam: payload.scholarshipTargetExam ?? null,
+        p_questions: payload.questions,
+        p_scheduled_at: payload.scheduledAt,
+      });
+      invalidateAdminCache();
+      return mapTest(row);
+    }
+    throw error;
+  }
 }
 
 export async function updateTest(payload: UpdateTestPayload): Promise<TestItem> {
   const safeDurationMinutes = coerceDurationMinutes(payload.durationMinutes);
 
-  const row = await rpc<TestRow>(endpoints.admin.updateTest, {
-    p_test_id: payload.testId,
-    p_title: payload.title,
-    p_description: payload.description,
-    p_duration_minutes: safeDurationMinutes,
-    p_batch_id: payload.batchId ?? null,
-    p_type: payload.type,
-    p_subject: payload.subject,
-    p_scheduled_at: payload.scheduledAt,
-    p_scholarship_admission_class: payload.scholarshipAdmissionClass ?? null,
-    p_scholarship_target_exam: payload.scholarshipTargetExam ?? null,
-  });
+  if (payload.testId.startsWith('pdf_test_')) {
+    const existing = await getPdfNativeTestById(payload.testId);
+    if (existing) {
+      const qRelations = await getLocalPdfNativeTestQuestions(payload.testId);
+      const qIds = qRelations.map((tq) => tq.question_id);
+      await updatePdfNativeTest({
+        id: payload.testId,
+        title: payload.title,
+        description: payload.description,
+        duration_minutes: safeDurationMinutes,
+        subject: (payload.subject as any) || existing.subject,
+        status: existing.status,
+        question_ids: qIds,
+        sections: existing.sections,
+      });
+      const updated = await getPdfNativeTestById(payload.testId);
+      invalidateAdminCache();
+      if (updated) {
+        return mapPdfNativeTestToCbtTestItem(updated);
+      }
+    }
+  }
 
-  invalidateAdminCache();
-  return mapTest(row);
+  try {
+    const row = await rpc<TestRow>(endpoints.admin.updateTest, {
+      p_test_id: payload.testId,
+      p_title: payload.title,
+      p_description: payload.description,
+      p_duration_minutes: safeDurationMinutes,
+      p_batch_id: payload.batchId ?? null,
+      p_type: payload.type,
+      p_subject: payload.subject,
+      p_scheduled_at: payload.scheduledAt,
+      p_scholarship_admission_class: payload.scholarshipAdmissionClass ?? null,
+      p_scholarship_target_exam: payload.scholarshipTargetExam ?? null,
+      p_is_open_for_all: payload.isOpenForAll ?? false,
+    });
+
+    invalidateAdminCache();
+    return mapTest(row);
+  } catch (error) {
+    const message = error instanceof Error ? error.message.toLowerCase() : '';
+    if (message.includes('parameter') || message.includes('function') || message.includes('schema cache')) {
+      const legacyRow = await rpc<TestRow>(endpoints.admin.updateTest, {
+        p_test_id: payload.testId,
+        p_title: payload.title,
+        p_description: payload.description,
+        p_duration_minutes: safeDurationMinutes,
+        p_batch_id: payload.batchId ?? null,
+        p_type: payload.type,
+        p_subject: payload.subject,
+        p_scheduled_at: payload.scheduledAt,
+        p_scholarship_admission_class: payload.scholarshipAdmissionClass ?? null,
+        p_scholarship_target_exam: payload.scholarshipTargetExam ?? null,
+      });
+
+      invalidateAdminCache();
+      return mapTest(legacyRow);
+    }
+    throw error;
+  }
 }
 
 export async function setTestStarted(testId: string, isStarted: boolean): Promise<TestItem> {
+  if (testId.startsWith('pdf_test_')) {
+    await publishPdfNativeTest(testId);
+    const pdfNative = await getPdfNativeTestById(testId);
+    invalidateAdminCache();
+    if (pdfNative) {
+      return mapPdfNativeTestToCbtTestItem(pdfNative);
+    }
+  }
+
   const row = await rpc<TestRow>(endpoints.admin.setTestStarted, {
     p_test_id: testId,
     p_is_started: isStarted,
@@ -310,6 +526,12 @@ export async function approveAdmin(userId: string): Promise<AppUser> {
 }
 
 export async function deleteTest(testId: string) {
+  if (testId.startsWith('pdf_test_')) {
+    await deletePdfNativeTest(testId);
+    invalidateAdminCache();
+    return;
+  }
+
   await rpc<string>(endpoints.admin.deleteTest, {
     p_test_id: testId,
   });
@@ -461,39 +683,119 @@ export async function fetchViolationAnalytics(): Promise<ViolationSummary[]> {
   return rows.map(mapViolationSummary);
 }
 
+export async function fetchActivityLogs(options?: {
+  category?: string;
+  userId?: string;
+  eventType?: string;
+  status?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<ActivityLogEntry[]> {
+  try {
+    const rows = await rpc<ActivityLogRow[]>(endpoints.admin.fetchActivityLogs, {
+      p_category: options?.category ?? null,
+      p_user_id: options?.userId ?? null,
+      p_event_type: options?.eventType ?? null,
+      p_status: options?.status ?? null,
+      p_limit: options?.limit ?? 50,
+      p_offset: options?.offset ?? 0,
+    });
+    return (rows || []).map(mapActivityLog);
+  } catch {
+    return [];
+  }
+}
+
+
 export async function fetchQuestionSets(): Promise<QuestionBankSet[]> {
-  const rows = await workerRequest<Array<{
+  type SetRow = {
     set_id: number;
     pdf_name: string;
     question_count: number;
     created_at: string;
-  }>>('/question-sets');
+  };
 
-  return rows.map((row) => ({
-    setId: row.set_id,
+  let rows: SetRow[] = [];
+  let fetchError: Error | null = null;
+
+  try {
+    rows = await selectRows<SetRow>(
+      'question_sets',
+      'set_id,pdf_name,question_count,created_at',
+      {
+        order: 'created_at.desc',
+        limit: 200,
+      },
+    );
+  } catch (err) {
+    fetchError = err instanceof Error ? err : new Error(String(err));
+  }
+
+  if (!rows || rows.length === 0) {
+    try {
+      rows = await workerRequest<SetRow[]>('/question-sets');
+    } catch (workerErr) {
+      if (!fetchError) {
+        fetchError = workerErr instanceof Error ? workerErr : new Error(String(workerErr));
+      }
+    }
+  }
+
+  if ((!rows || rows.length === 0) && fetchError) {
+    throw new Error(`Question Bank API failed: ${fetchError.message}`);
+  }
+
+  return (rows || []).map((row) => ({
+    setId: Number(row.set_id),
     pdfName: row.pdf_name,
-    questionCount: row.question_count,
+    questionCount: Number(row.question_count),
     createdAt: row.created_at,
   }));
 }
 
 export async function fetchQuestionSetQuestions(setId: number): Promise<QuestionBankQuestion[]> {
-  const rows = await workerRequest<Array<{
+  type QuestionRow = {
     id: number;
     question: string;
     options: string[];
     type: 'mcq' | 'integer';
     image_url: string | null;
     correct_answer: string;
-  }>>(`/get-questions?set_id=${setId}&include_answers=true`);
+  };
 
-  return rows.map((row) => ({
-    id: row.id,
+  let rows: QuestionRow[] = [];
+  let fetchError: Error | null = null;
+
+  try {
+    rows = await selectRows<QuestionRow>(
+      'questions',
+      'id,question,options,type,image_url,correct_answer',
+      {
+        set_id: `eq.${setId}`,
+        limit: 500,
+      },
+    );
+  } catch (err) {
+    fetchError = err instanceof Error ? err : new Error(String(err));
+  }
+
+  if (!rows || rows.length === 0) {
+    try {
+      rows = await workerRequest<QuestionRow[]>(`/get-questions?set_id=${setId}&include_answers=true`);
+    } catch (workerErr) {
+      if (!fetchError) {
+        fetchError = workerErr instanceof Error ? workerErr : new Error(String(workerErr));
+      }
+    }
+  }
+
+  return (rows || []).map((row) => ({
+    id: Number(row.id),
     setId,
     question: row.question,
-    options: Array.isArray(row.options) ? row.options : [],
+    options: Array.isArray(row.options) ? row.options : typeof row.options === 'string' ? JSON.parse(row.options) : [],
     type: row.type,
-    imageUrl: row.image_url,
+    imageUrl: normalizeAssetUrl(row.image_url),
     correctAnswer: row.correct_answer,
   }));
 }
@@ -521,4 +823,41 @@ export async function createQuestionSet(payload: {
       questions: payload.questions,
     }),
   });
+}
+
+export async function deleteQuestionSet(setId: number) {
+  // 1. Try RPC function delete_question_set in Supabase
+  try {
+    await rpc<string>(endpoints.admin.deleteQuestionSet, {
+      p_set_id: setId,
+    });
+    invalidateAdminCache();
+    return { success: true, set_id: setId };
+  } catch {
+    // RPC might not exist on older DB migration, continue
+  }
+
+  // 2. Try Worker endpoint
+  try {
+    const res = await workerRequest<{ success: boolean; set_id: number }>(`/delete-question-set?set_id=${setId}`, {
+      method: 'DELETE',
+    });
+    if (res?.success) {
+      invalidateAdminCache();
+      return res;
+    }
+  } catch {
+    // Worker request failed, continue to direct REST
+  }
+
+  // 3. Direct REST delete fallback
+  try {
+    await deleteRows('questions', { set_id: `eq.${setId}` });
+  } catch {
+    // Ignore questions delete errors if already empty
+  }
+
+  await deleteRows('question_sets', { set_id: `eq.${setId}` });
+  invalidateAdminCache();
+  return { success: true, set_id: setId };
 }

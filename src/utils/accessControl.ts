@@ -10,6 +10,24 @@ export function getEligibility(user: AppUser | null, test: TestItem) {
     };
   }
 
+  const isOpenForAll =
+    Boolean(test.isOpenForAll) ||
+    !test.batchId ||
+    test.batchId.trim() === '' ||
+    test.batchId === 'ALL' ||
+    test.batchId.toLowerCase() === 'all batches' ||
+    test.batchId.toLowerCase() === 'all' ||
+    test.accessMode === 'OPEN_FOR_ALL';
+
+  if (isOpenForAll) {
+    return {
+      allowed: true,
+      label: 'Open For All',
+      reason: 'This paper is open for all students across any batch.',
+      ctaLabel: 'Start Paper',
+    };
+  }
+
   if (test.type === 'scholarship') {
     if (user?.role === 'miitjee_student') {
       return {
@@ -46,7 +64,26 @@ export function getEligibility(user: AppUser | null, test: TestItem) {
     };
   }
 
+  // Check allowedBatches array (PDF-native tests use this for multi-batch access)
+  if (user.batchId && test.allowedBatches && test.allowedBatches.includes(user.batchId)) {
+    return {
+      allowed: true,
+      label: user.role === 'miitjee_student' ? 'Ready' : 'Batch Match',
+      reason: `This paper is available for your ${user.batchId} batch.`,
+      ctaLabel: user.role === 'miitjee_student' ? 'Start Paper' : 'Open Paper',
+    };
+  }
+
   if (user.batchId && user.batchId !== test.batchId) {
+    // If there are allowedBatches but user is not in any of them
+    if (test.allowedBatches && test.allowedBatches.length > 0) {
+      return {
+        allowed: false,
+        label: 'Different Batch',
+        reason: `You are enrolled in ${user.batchId}. This paper is restricted to: ${test.allowedBatches.join(', ')}.`,
+        ctaLabel: 'Different Batch',
+      };
+    }
     return {
       allowed: false,
       label: 'Different Batch',

@@ -53,5 +53,8 @@ export const endpoints = {
     deleteEnrollmentQuery: 'delete_enrollment_query',
     deleteScholarshipRegistration: 'delete_scholarship_registration',
     deleteGeneralEnquiry: 'delete_general_enquiry',
+    deleteQuestionSet: 'delete_question_set',
+    insertActivityLogs: 'insert_activity_logs',
+    fetchActivityLogs: 'fetch_activity_logs',
   },
 };

@@ -7,7 +7,15 @@ declare const process:
   | undefined;
 
 function readEnv(name: string, fallback?: string) {
-  const val = process?.env?.[name];
+  let metaEnv: Record<string, string> | undefined;
+  try {
+    metaEnv = new Function('return typeof import.meta !== "undefined" ? import.meta.env : undefined')() as Record<string, string> | undefined;
+  } catch {
+    metaEnv = undefined;
+  }
+  const metaVal = metaEnv?.[name] || metaEnv?.[`VITE_${name}`];
+  const procVal = process?.env?.[name] || process?.env?.[`VITE_${name}`];
+  const val = metaVal || procVal;
   return (val === undefined || val === '') ? fallback : val;
 }
 
@@ -20,17 +28,31 @@ function normalizeBaseUrl(value: string | undefined, fallback = '') {
   return cleanEnvValue(value, fallback).replace(/\/+$/, '');
 }
 
-function isLikelyHttpsUrl(value: string) {
-  return /^https:\/\/[^/\s]+(?:\/.*)?$/i.test(value);
+function isLikelyHttpOrHttpsUrl(value: string) {
+  return /^https?:\/\/[^/\s]+(?:\/.*)?$/i.test(value);
 }
 
+const rawWorkerUrl =
+  (typeof process !== 'undefined' && process.env?.MIITJEE_BACKEND_URL) ||
+  (typeof process !== 'undefined' && process.env?.CLOUDFLARE_WORKER_URL) ||
+  readEnv('MIITJEE_BACKEND_URL') ||
+  readEnv('CLOUDFLARE_WORKER_URL') ||
+  supabasePublicConfig.workerUrl;
+
+const rawSupabaseUrl =
+  (typeof process !== 'undefined' && process.env?.SUPABASE_URL) ||
+  readEnv('SUPABASE_URL') ||
+  supabasePublicConfig.url;
+
+const rawSupabaseAnonKey =
+  (typeof process !== 'undefined' && process.env?.SUPABASE_ANON_KEY) ||
+  readEnv('SUPABASE_ANON_KEY') ||
+  supabasePublicConfig.anonKey;
+
 export const appEnv = {
-  supabaseUrl: normalizeBaseUrl(readEnv('SUPABASE_URL'), supabasePublicConfig.url),
-  supabaseAnonKey: cleanEnvValue(readEnv('SUPABASE_ANON_KEY'), supabasePublicConfig.anonKey),
-  workerBaseUrl: normalizeBaseUrl(readEnv(
-    'MIITJEE_BACKEND_URL',
-    readEnv('CLOUDFLARE_WORKER_URL', supabasePublicConfig.workerUrl),
-  )),
+  supabaseUrl: normalizeBaseUrl(rawSupabaseUrl, supabasePublicConfig.url),
+  supabaseAnonKey: cleanEnvValue(rawSupabaseAnonKey, supabasePublicConfig.anonKey),
+  workerBaseUrl: normalizeBaseUrl(rawWorkerUrl, supabasePublicConfig.workerUrl),
   supabaseRedirectScheme: supabasePublicConfig.redirectScheme,
   appPlatform: supabasePublicConfig.appPlatform,
 };
@@ -40,7 +62,7 @@ export function assertBackendConfig() {
     throw new Error('Supabase environment is missing. Set SUPABASE_URL and SUPABASE_ANON_KEY before continuing.');
   }
 
-  if (!isLikelyHttpsUrl(appEnv.supabaseUrl)) {
+  if (!isLikelyHttpOrHttpsUrl(appEnv.supabaseUrl)) {
     throw new Error('SUPABASE_URL is invalid. Use your full HTTPS project URL, for example https://your-project.supabase.co.');
   }
 }
@@ -50,7 +72,7 @@ export function assertWorkerConfig() {
     throw new Error('Worker environment is missing. Set MIITJEE_BACKEND_URL before continuing.');
   }
 
-  if (!isLikelyHttpsUrl(appEnv.workerBaseUrl)) {
-    throw new Error('MIITJEE_BACKEND_URL is invalid. Use a full HTTPS base URL.');
+  if (!isLikelyHttpOrHttpsUrl(appEnv.workerBaseUrl)) {
+    throw new Error('MIITJEE_BACKEND_URL is invalid. Use a full HTTP or HTTPS base URL.');
   }
 }

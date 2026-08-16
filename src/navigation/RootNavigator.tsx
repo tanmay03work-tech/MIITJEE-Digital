@@ -30,12 +30,44 @@ import { ViewResultsScreen } from '../screens/admin/ViewResultsScreen';
 import { ScholarshipRegistrationsScreen } from '../screens/admin/ScholarshipRegistrationsScreen';
 import { BatchAccessRequestsScreen } from '../screens/admin/BatchAccessRequestsScreen';
 import { GeneralEnquiriesScreen } from '../screens/admin/GeneralEnquiriesScreen';
+import { ActivityLogsScreen } from '../screens/admin/ActivityLogsScreen';
+import { AdminDiagnosticsScreen } from '../screens/admin/AdminDiagnosticsScreen';
+import { PdfNativeTestBuilderScreen } from '../screens/admin/PdfNativeTestBuilder/PdfNativeTestBuilderScreen';
+import { PdfNativeSetManagementScreen } from '../screens/admin/PdfNativeTestBuilder/PdfNativeSetManagementScreen';
+import { PdfNativeTestCreatorScreen } from '../screens/admin/PdfNativeTestBuilder/PdfNativeTestCreatorScreen';
+import { PdfNativeTestManagementScreen } from '../screens/admin/PdfNativeTestBuilder/PdfNativeTestManagementScreen';
+import { PdfNativeResultScreen } from '../screens/admin/PdfNativeTestBuilder/PdfNativeResultScreen';
+import { PdfNativeReviewScreen } from '../screens/admin/PdfNativeTestBuilder/PdfNativeReviewScreen';
 import { AnimatedSplashScreen } from '../components/common/AnimatedSplashScreen';
+
+import { ExamLinkScreen } from '../screens/tests/ExamLinkScreen';
+import { getBaseAppUrl } from '../utils/urlHelper';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const idleGlobal = globalThis as typeof globalThis & {
   requestIdleCallback?: (callback: () => void) => number;
   cancelIdleCallback?: (handle: number) => void;
+};
+
+const linking = {
+  prefixes: [
+    getBaseAppUrl(),
+    'https://miitjee-cbt.vercel.app',
+    'https://miitjee-digital.vercel.app',
+    'https://exam.miitjee.org',
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'com.miitjee.digital://',
+  ],
+  config: {
+    screens: {
+      ExamLink: 'exam/:shareCode',
+      Auth: 'auth',
+      TestIntro: 'test/:testId',
+      TestAttempt: 'attempt/:testId',
+      TestResult: 'result/:testId/:resultId',
+    },
+  },
 };
 
 const navigationTheme = {
@@ -144,7 +176,7 @@ export function RootNavigator() {
   }
 
   return (
-    <NavigationContainer theme={navigationTheme}>
+    <NavigationContainer theme={navigationTheme} linking={linking}>
       <Stack.Navigator
         screenOptions={{
           headerShown: false,
@@ -152,12 +184,16 @@ export function RootNavigator() {
           animation: Platform.OS === 'ios' ? 'slide_from_right' : 'fade_from_bottom',
         }}>
         {!user ? (
-          <Stack.Screen name="Auth" component={AuthScreen} />
+          <>
+            <Stack.Screen name="Auth" component={AuthScreen} />
+            <Stack.Screen name="ExamLink" component={ExamLinkScreen} />
+          </>
         ) : showPendingApproval ? (
           <Stack.Screen name="PendingApproval" component={PendingApprovalScreen} />
         ) : (
           <>
             <Stack.Screen name="MainTabs" component={AppTabs} />
+            <Stack.Screen name="ExamLink" component={ExamLinkScreen} />
             <Stack.Screen name="CreateBatch" component={CreateBatchScreen} />
             <Stack.Screen name="Batches" component={BatchesScreen} />
             <Stack.Screen name="Enquiry" component={EnquiryScreen} />
@@ -178,6 +214,14 @@ export function RootNavigator() {
             <Stack.Screen name="ScholarshipRegistrations" component={ScholarshipRegistrationsScreen} />
             <Stack.Screen name="BatchAccessRequests" component={BatchAccessRequestsScreen} />
             <Stack.Screen name="GeneralEnquiries" component={GeneralEnquiriesScreen} />
+            <Stack.Screen name="ActivityLogs" component={ActivityLogsScreen} />
+            <Stack.Screen name="AdminDiagnostics" component={AdminDiagnosticsScreen} />
+            <Stack.Screen name="PdfNativeTestBuilder" component={PdfNativeTestBuilderScreen} />
+            <Stack.Screen name="PdfNativeSetManagement" component={PdfNativeSetManagementScreen} />
+            <Stack.Screen name="PdfNativeTestCreator" component={PdfNativeTestCreatorScreen} />
+            <Stack.Screen name="PdfNativeTestManagement" component={PdfNativeTestManagementScreen} />
+            <Stack.Screen name="PdfNativeResult" component={PdfNativeResultScreen} />
+            <Stack.Screen name="PdfNativeReview" component={PdfNativeReviewScreen} />
           </>
         )}
       </Stack.Navigator>

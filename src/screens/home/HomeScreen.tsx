@@ -300,6 +300,7 @@ export function HomeScreen({ navigation }: MainTabScreenProps<'Home'>) {
   return (
     <Screen useScrollView={false}>
       <FlatList
+        style={styles.flex}
         data={visibleSections}
         keyExtractor={(item) => item.id}
         renderItem={renderSection}
@@ -332,6 +333,9 @@ export function HomeScreen({ navigation }: MainTabScreenProps<'Home'>) {
 }
 
 const styles = StyleSheet.create({
+  flex: {
+    flex: 1,
+  },
   content: {
     paddingBottom: spacing.lg,
   },

@@ -10,11 +10,14 @@ const androidDir = path.join(rootDir, 'android');
 const gradleCommand = process.platform === 'win32'
   ? path.join(androidDir, 'gradlew.bat')
   : path.join(androidDir, 'gradlew');
-const buildTarget = process.argv[2] === 'release' ? ':app:bundleRelease' : ':app:assembleDebug';
+const arg = process.argv[2];
+const buildTarget = arg === 'release' || arg === 'bundle'
+  ? ':app:bundleRelease'
+  : (arg === 'apk' || arg === 'assembleRelease' ? ':app:assembleRelease' : ':app:assembleDebug');
 const javaHome = path.join(rootDir, 'toolchains', 'jdk-17.0.18+8');
 const androidUserHome = path.join(rootDir, '.android-codex');
 const gradleJvmArgs =
-  '-Xmx2048m -Xms512m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8';
+  '-Xmx4096m -Xms1024m -XX:MaxMetaspaceSize=1024m -Dfile.encoding=UTF-8';
 const sharedEnv = withPreferredNodeInEnv({
   ...process.env,
   JAVA_HOME: javaHome,

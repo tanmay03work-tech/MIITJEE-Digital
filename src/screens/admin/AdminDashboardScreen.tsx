@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo } from 'react';
 import { Alert, FlatList, ListRenderItem, StyleSheet, Text, View } from 'react-native';
-import { BarChart3, CircleHelp, FilePlus2, FolderOpen, GraduationCap, Layers3, ListChecks, ShieldAlert, Trash2, UsersRound } from 'lucide-react-native';
+import { Activity, BarChart3, CircleHelp, FilePlus, FilePlus2, FileText, FolderOpen, GraduationCap, Layers3, ListChecks, ScrollText, ShieldAlert, Trash2, UsersRound } from 'lucide-react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
 import { AppHeader } from '../../components/common/AppHeader';
@@ -39,7 +39,12 @@ export function AdminDashboardScreen({ navigation }: RootStackScreenProps<'Admin
     }, [isAdmin, loadAdminData, user]),
   );
 
-  const totalQuestions = useMemo(() => tests.reduce((sum, test) => sum + test.questionCount, 0), [tests]);
+  const questionBankSets = useAppStore((state) => state.questionBankSets);
+  const totalQuestions = useMemo(() => {
+    const testQuestions = tests.reduce((sum, test) => sum + test.questionCount, 0);
+    const bankQuestions = questionBankSets.reduce((sum, set) => sum + set.questionCount, 0);
+    return Math.max(analytics.totalQuestions || 0, testQuestions + bankQuestions);
+  }, [analytics.totalQuestions, questionBankSets, tests]);
   const hasVisibleDashboardData =
     tests.length > 0 || users.length > 0 ||
     results.length > 0 ||
@@ -83,7 +88,10 @@ export function AdminDashboardScreen({ navigation }: RootStackScreenProps<'Admin
       if (item.type === 'actions') {
         return (
           <View style={styles.actions}>
-            <AdminActionCard title="Create Test" description="Build weekly or scholarship papers with structured questions." icon={FilePlus2} color={colors.primary} onPress={() => navigation.navigate('CreateTest')} />
+            <AdminActionCard title="Test Management" description="Drafts, live tests, subject sections, and CBT publishing workflow." icon={ListChecks} color={colors.primary} onPress={() => navigation.navigate('PdfNativeTestManagement')} />
+            <AdminActionCard title="PDF Question Sets" description="Question bank sets, ordered question packages, and test creation from sets." icon={FolderOpen} color="#2563EB" onPress={() => navigation.navigate('PdfNativeSetManagement')} />
+            <AdminActionCard title="PDF-Native Builder" description="Detect question regions directly from original PDF with 100% fidelity." icon={FileText} color={colors.primaryDeep || colors.primary} onPress={() => navigation.navigate('PdfNativeTestBuilder')} />
+            <AdminActionCard title="Create Test" description="Build weekly or scholarship papers with structured questions." icon={FilePlus2} color="#15803D" onPress={() => navigation.navigate('CreateTest')} />
             <AdminActionCard title="Question Bank" description="Upload PDF sets once, review them, and reuse questions across multiple papers." icon={FolderOpen} color={colors.info} onPress={() => navigation.navigate('QuestionBank', { mode: 'manage' })} />
             <AdminActionCard title="Create Batch" description="Add a new batch with image, description, and class details." icon={Layers3} color={colors.warning} onPress={() => navigation.navigate('CreateBatch')} />
             <AdminActionCard title="Manage Users" description="Assign roles, batch access, and student permissions in one place." icon={UsersRound} color={colors.info} onPress={() => navigation.navigate('ManageUsers')} />
@@ -113,6 +121,8 @@ export function AdminDashboardScreen({ navigation }: RootStackScreenProps<'Admin
                 ])
               }
             />
+            <AdminActionCard title="Activity Logs" description="Review operational logs for logins, device issues, exams, and admin actions." icon={ScrollText} color={colors.primary} onPress={() => navigation.navigate('ActivityLogs')} />
+            <AdminActionCard title="Issue Diagnostics" description="Real-time student login issues, submission errors, device blocks, and quick resolution controls." icon={Activity} color={colors.warning} onPress={() => navigation.navigate('AdminDiagnostics')} />
             <AdminActionCard title="Scholarship Forms" description="Check scholarship registrations in their own dedicated queue." icon={GraduationCap} color={colors.warning} onPress={() => navigation.navigate('ScholarshipRegistrations')} />
             <AdminActionCard title="Batch Requests" description="Open batch access requests in a separate moderation tab." icon={Layers3} color={colors.info} onPress={() => navigation.navigate('BatchAccessRequests')} />
             <AdminActionCard title="General Enquiries" description="Handle admission and support questions without mixing them into results." icon={CircleHelp} color={colors.primary} onPress={() => navigation.navigate('GeneralEnquiries')} />
@@ -157,12 +167,19 @@ export function AdminDashboardScreen({ navigation }: RootStackScreenProps<'Admin
   return (
     <Screen useScrollView={false}>
       <FlatList
+        style={styles.flex}
         data={items}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
         ListHeaderComponent={
           <>
-            <AppHeader title="Admin Panel" subtitle="Batches, tests, access, and moderation tools" showLogo={false} />
+            <AppHeader
+              title="Admin Panel"
+              subtitle="Batches, tests, access, and moderation tools"
+              showLogo={false}
+              showBack={true}
+              onBack={() => navigation.navigate('MainTabs')}
+            />
             {isAdminDataLoading ? (
               <View style={styles.syncBannerWrap}>
                 <Card style={styles.syncBanner}>
@@ -186,6 +203,9 @@ export function AdminDashboardScreen({ navigation }: RootStackScreenProps<'Admin
 }
 
 const styles = StyleSheet.create({
+  flex: {
+    flex: 1,
+  },
   content: {
     paddingBottom: spacing.xxxl,
   },

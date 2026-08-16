@@ -5,6 +5,7 @@ export async function uploadExamAsset(params: {
   name?: string | null;
   mimeType?: string | null;
   folder: 'pdfs' | 'images';
+  file?: Blob | File;
 }) {
   return uploadFileToStorage({
     bucket: 'exam-assets',
@@ -12,5 +13,6 @@ export async function uploadExamAsset(params: {
     uri: params.uri,
     name: params.name ?? undefined,
     mimeType: params.mimeType ?? undefined,
+    file: params.file,
   });
 }

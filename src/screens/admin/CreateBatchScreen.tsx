@@ -41,6 +41,7 @@ export function CreateBatchScreen({ navigation }: RootStackScreenProps<'CreateBa
         name: file.name,
         mimeType: file.type,
         folder: 'images',
+        file: (file as { file?: File }).file,
       });
 
       setImageUrl(uploaded.publicUrl);

@@ -11,6 +11,7 @@
   "dependencies": {
     "chanfana": "^3.3.0",
     "hono": "^4.12.12",
+    "pdf-lib": "^1.17.1",
     "zod": "^4.3.6"
   },
   "devDependencies": {

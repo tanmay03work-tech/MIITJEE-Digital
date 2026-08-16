@@ -1,7 +1,11 @@
 import React from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
+import { ArrowLeft } from 'lucide-react-native';
+import { useNavigation } from '@react-navigation/native';
 
-import { colors, spacing, typography } from '../../theme';
+import miitjeeLogo from '../../assets/branding/miitjee-logo.png';
+import { AnimatedPressable } from './AnimatedPressable';
+import { colors, radius, spacing, typography } from '../../theme';
 
 interface HeaderRowProps {
   title: string;
@@ -9,17 +13,51 @@ interface HeaderRowProps {
   rightSlot?: React.ReactNode;
   showLogo?: boolean;
   compact?: boolean;
+  onBack?: () => void;
+  showBack?: boolean;
 }
 
-export function HeaderRow({ title, subtitle, rightSlot, showLogo = true, compact = false }: HeaderRowProps) {
+export function HeaderRow({
+  title,
+  subtitle,
+  rightSlot,
+  showLogo = true,
+  compact = false,
+  onBack,
+  showBack,
+}: HeaderRowProps) {
+  let navigation: any = null;
+  try {
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    navigation = useNavigation();
+  } catch {
+    // Fallback if component is rendered outside NavigationContainer
+  }
+
+  const canGoBack = Boolean(navigation?.canGoBack?.());
+  const displayBack = showBack !== undefined ? showBack : (canGoBack || Boolean(onBack));
+
+  const handleBack = () => {
+    if (onBack) {
+      onBack();
+    } else if (navigation?.canGoBack?.()) {
+      navigation.goBack();
+    }
+  };
+
   return (
     <View style={[styles.container, compact && styles.containerCompact]}>
       <View style={styles.contentRow}>
         <View style={styles.leading}>
-          {showLogo ? (
+          {displayBack ? (
+            <AnimatedPressable style={styles.backButton} onPress={handleBack} accessibilityLabel="Go Back">
+              <ArrowLeft size={18} color={colors.primary} />
+              <Text style={styles.backText}>Back</Text>
+            </AnimatedPressable>
+          ) : showLogo ? (
             <View style={[styles.logoWrap, compact && styles.logoWrapCompact]}>
               <Image
-                source={require('../../assets/branding/miitjee-logo.png')}
+                source={miitjeeLogo}
                 style={[styles.logo, compact && styles.logoCompact]}
                 resizeMode="contain"
               />
@@ -71,6 +109,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
     minWidth: 0,
+  },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: radius.pill,
+    backgroundColor: colors.primarySoft,
+    borderWidth: 1,
+    borderColor: colors.border,
+    flexShrink: 0,
+  },
+  backText: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '700',
   },
   trailing: {
     flexShrink: 0,

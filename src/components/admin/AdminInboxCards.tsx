@@ -97,7 +97,7 @@ export const AdminResultCard = memo(function AdminResultCard({ result, user, tes
         <Badge label={`Rank #${result.rank}`} tone="success" />
       </View>
       <Text style={styles.title}>{test?.title ?? 'Untitled paper'}</Text>
-      <Text style={styles.emphasis}>{user?.fullName ?? 'Unknown learner'}</Text>
+      <Text style={styles.emphasis}>{result.studentName || user?.fullName || 'Unknown learner'}</Text>
       <Text style={styles.meta}>{`${result.correctAnswers}/${result.totalQuestions} correct | ${formatDateLabel(result.submittedAt)}`}</Text>
       <View style={styles.footerRow}>
         <View style={styles.scoreWrap}>

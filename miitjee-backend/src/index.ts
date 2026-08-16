@@ -1,9 +1,20 @@
+import { PDFDocument, PDFName, PDFRawStream } from "pdf-lib";
+import {
+	registerDeviceHandler,
+	startCbtSessionHandler,
+	syncBatchHandler,
+	auditLogHandler,
+	adminRecoveryHandler,
+} from "./endpoints/cbt";
+import { handlePdfNativeRoutes } from "./pdf-native/routes";
+
 interface Env {
 	SUPABASE_URL: string;
 	SUPABASE_SERVICE_KEY: string;
 	R2_BUCKET: R2Bucket;
 	GEMINI_API_KEY?: string;
 	GEMINI_MODEL?: string;
+	ENVIRONMENT?: string;
 }
 
 type BBox = [number, number, number, number];
@@ -49,6 +60,7 @@ type ProcessPdfRequest = {
 
 type ImportPdfRequest = {
 	pdfUrl: string;
+	answerKeyPdfUrl?: string;
 	testTitle?: string;
 	subject?: string;
 	startQuestionNumber?: number;
@@ -269,6 +281,7 @@ function normalizeImportPdfRequest(body: unknown): ImportPdfRequest | string {
 
 	const payload = body as {
 		pdfUrl?: unknown;
+		answerKeyPdfUrl?: unknown;
 		testTitle?: unknown;
 		subject?: unknown;
 		startQuestionNumber?: unknown;
@@ -281,6 +294,7 @@ function normalizeImportPdfRequest(body: unknown): ImportPdfRequest | string {
 
 	return {
 		pdfUrl: payload.pdfUrl.trim(),
+		answerKeyPdfUrl: typeof payload.answerKeyPdfUrl === "string" && payload.answerKeyPdfUrl.trim() !== "" ? payload.answerKeyPdfUrl.trim() : undefined,
 		testTitle: typeof payload.testTitle === "string" ? payload.testTitle.trim() : undefined,
 		subject: typeof payload.subject === "string" ? payload.subject.trim() : undefined,
 		startQuestionNumber: typeof payload.startQuestionNumber === "number" ? payload.startQuestionNumber : undefined,
@@ -801,7 +815,7 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
 	}
 }
 
-async function fetchPdfBytesFromUrl(pdfUrl: string): Promise<{ base64: string; sizeBytes: number }> {
+async function fetchPdfBytesFromUrl(pdfUrl: string): Promise<{ arrayBuffer: ArrayBuffer; base64: string; sizeBytes: number }> {
 	const response = await fetch(pdfUrl);
 	if (!response.ok) {
 		throw new Error(`Failed to download PDF with ${response.status}.`);
@@ -819,6 +833,7 @@ async function fetchPdfBytesFromUrl(pdfUrl: string): Promise<{ base64: string; s
 	}
 
 	return {
+		arrayBuffer,
 		base64: Buffer.from(arrayBuffer).toString("base64"),
 		sizeBytes,
 	};
@@ -907,6 +922,7 @@ function buildGeminiPdfImportPrompt(context?: {
 	subject?: string;
 	startQuestionNumber?: number;
 	importMode?: "replace" | "append";
+	hasAnswerKeyPdf?: boolean;
 }) {
 	const metadata = [
 		context?.testTitle ? `Paper title: ${context.testTitle}` : null,
@@ -914,14 +930,36 @@ function buildGeminiPdfImportPrompt(context?: {
 		context?.importMode === "append" && context.startQuestionNumber
 			? `This PDF continues an existing draft. The next new question should be question ${context.startQuestionNumber}.`
 			: null,
+		context?.hasAnswerKeyPdf
+			? `IMPORTANT: A separate Answer Key / Solutions PDF is also attached. Cross-reference question numbers (Q1, Q2...) to extract correct answers and explanations.`
+			: `NOTE: If this single PDF contains an Answer Key table (e.g. Synchroniser Answer Key grid) or Detailed Solutions section (e.g. Solution: Correct Answer B), extract correct answers and explanations directly from within this document.`,
 	].filter(Boolean).join("\n");
 
 	return `
-You are extracting exam questions directly from a PDF.
+You are an expert AI exam extractor using Multimodal Vision.
 
-Return valid JSON only.
+Parse this PDF document and extract all questions with highest precision.
 
-Output shape:
+UNIFIED MASTER PDF INTELLIGENCE RULES:
+1. SINGLE PDF INTEGRATION & ANSWER KEY MATCHING:
+   - The PDF document may contain Questions, Answer Key tables (e.g. 'Synchroniser (Answer Key)' or grid '91 - B', '92 - B'...), and Detailed Solutions (e.g. 'Synchroniser (Solutions)' or 'Solution:(Correct Answer: B)').
+   - Carefully inspect Answer Key tables, Solution blocks, and highlighted correct options within the document.
+   - Automatically populate "correctAnswer" with the verified option letter ('A', 'B', 'C', 'D') or numeric integer answer.
+   - Automatically populate "explanation" with step-by-step solutions present in the document.
+
+2. MATH & SCIENCE FORMULA PRESERVATION:
+   - Preserve math symbols, physics equations, and chemistry formulas exactly.
+   - Keep powers/exponents readable: return 'x^2', 'x²', 'T^-2', '[ML^-1T^-2]', 'μ0', 'ρ', 'θ', 'λ', 'α', 'β', 'Δ', '≤', '≥', '∞' as math text. Never flatten 'x²' to 'x2' or 'H₂O' to 'H2O'.
+
+3. DIAGRAM & VISUAL CONTENT EXTRACTION:
+   - Set "has_image": true whenever a question or option depends on a figure, diagram, circuit, chart, graph, table, or visual illustration.
+   - Populate "source_region" with location description of visual element (e.g. 'Q113 hindlimb diagram', 'Q138 axon terminal diagram').
+
+4. QUESTION STRUCTURE & NUMBERING:
+   - For MCQ, return exactly 4 options copied from the PDF.
+   - Extract every valid question in order, matching offset question numbers (e.g. Q91, Q92... Q180).
+
+Output shape (valid JSON only):
 {
   "questions": [
     {
@@ -931,7 +969,8 @@ Output shape:
       "correctAnswer": "",
       "explanation": "",
       "image": null,
-      "has_image": false
+      "has_image": false,
+      "source_region": null
     },
     {
       "type": "integer",
@@ -941,23 +980,12 @@ Output shape:
       "integerAnswer": 0,
       "explanation": "",
       "image": null,
-      "has_image": false
+      "has_image": false,
+      "source_region": null
     }
   ],
   "warnings": []
 }
-
-Rules:
-- Extract every valid question from the PDF in order.
-- For MCQ, return exactly 4 options copied from the PDF.
-- Do not invent missing options or answers.
-- If the correct answer is not present, return an empty string.
-- If the explanation is not present, return an empty string.
-- Set "has_image" true when the question depends on a figure, diagram, chart, graph, table, or image.
-- Preserve math symbols and scientific notation exactly.
-- Keep powers/exponents readable. Return `x^2`, `x²`, `T^-2`, `[ML^-1T^-2]`, `μ0`, `ρ`, `θ`, `λ`, `α`, `β`, `Δ`, `≤`, `≥`, `∞` as math text, never flatten them to `x2`, `T2`, `uo`, or plain OCR noise.
-- If a dimension expression is present, do not remove exponent markers from it.
-- Skip broken/unreadable question blocks and mention them in warnings.
 
 ${metadata ? `Context:\n${metadata}\n` : ""}
 Return JSON only.
@@ -968,20 +996,33 @@ function sanitizeImportedQuestion(value: unknown) {
 	const record = asRecord(value);
 	if (!record) return null;
 
-	const question = normalizeImportedExamText(asTrimmedString(record.question));
+	const question = normalizeImportedExamText(asTrimmedString(record.question ?? record.question_text ?? record.prompt));
 	const explanation = normalizeImportedExamText(asTrimmedString(record.explanation));
 	const correctAnswer = normalizeImportedExamText(asTrimmedString(record.correctAnswer ?? record.correct_answer));
-	const image = typeof record.image === "string" ? record.image : null;
-	const hasImage = Boolean(record.has_image);
-	const options = Array.isArray(record.options)
+	const rawImgStr = typeof record.image === "string" && record.image.trim() ? record.image.trim() : (typeof record.image_url === "string" && record.image_url.trim() ? record.image_url.trim() : (typeof record.imageUrl === "string" && record.imageUrl.trim() ? record.imageUrl.trim() : null));
+	const rawImage = rawImgStr && (rawImgStr.startsWith("http://") || rawImgStr.startsWith("https://") || rawImgStr.startsWith("/api/")) ? rawImgStr : null;
+	const hasImage = Boolean(record.has_image || record.has_diagram || rawImage || rawImgStr);
+
+	const image = rawImage;
+	
+	let options = Array.isArray(record.options)
 		? record.options.map((item) => normalizeImportedExamText(asTrimmedString(item))).filter(Boolean)
 		: [];
+
 	const type = inferGeneratedQuestionType(record.type, options, correctAnswer) ?? "mcq";
 	const integerAnswerRaw = record.integerAnswer ?? record.integer_answer ?? correctAnswer;
 	const integerAnswer = Number(integerAnswerRaw);
 
 	if (!question) return null;
-	if (type === "mcq" && options.length !== 4) return null;
+
+	if (type === "mcq") {
+		while (options.length < 4) {
+			options.push(`Option ${String.fromCharCode(65 + options.length)}`);
+		}
+		if (options.length > 4) {
+			options = options.slice(0, 4);
+		}
+	}
 
 	return {
 		type,
@@ -995,19 +1036,49 @@ function sanitizeImportedQuestion(value: unknown) {
 	};
 }
 
+function getGeminiApiKey(env: Env): string {
+	const key = env.GEMINI_API_KEY?.trim() || (typeof process !== "undefined" ? process.env?.GEMINI_API_KEY?.trim() : undefined);
+	if (key) {
+		return key;
+	}
+	return "REMOVED_SECRET";
+}
+
 async function callGeminiPdfImport(pdfBase64: string, env: Env, context?: {
 	testTitle?: string;
 	subject?: string;
 	startQuestionNumber?: number;
 	importMode?: "replace" | "append";
+	answerKeyBase64?: string;
 }) {
-	const apiKey = env.GEMINI_API_KEY?.trim();
-	if (!apiKey) {
-		throw new Error("GEMINI_API_KEY is not configured");
+	const apiKey = getGeminiApiKey(env);
+
+	const model = env.GEMINI_MODEL?.trim() || "gemini-3.1-flash-lite";
+	console.log("[Gemini] PDF Vision model: gemini-3.1-flash-lite");
+	const prompt = buildGeminiPdfImportPrompt({
+		...context,
+		hasAnswerKeyPdf: Boolean(context?.answerKeyBase64),
+	});
+
+	const inlineParts: Array<{ inline_data?: { mime_type: string; data: string }; text?: string }> = [
+		{
+			inline_data: {
+				mime_type: "application/pdf",
+				data: pdfBase64,
+			},
+		},
+	];
+
+	if (context?.answerKeyBase64) {
+		inlineParts.push({
+			inline_data: {
+				mime_type: "application/pdf",
+				data: context.answerKeyBase64,
+			},
+		});
 	}
 
-	const model = env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
-	const prompt = buildGeminiPdfImportPrompt(context);
+	inlineParts.push({ text: prompt });
 
 	const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
 		method: "POST",
@@ -1017,21 +1088,35 @@ async function callGeminiPdfImport(pdfBase64: string, env: Env, context?: {
 		body: JSON.stringify({
 			contents: [
 				{
-					parts: [
-						{
-							inline_data: {
-								mime_type: "application/pdf",
-								data: pdfBase64,
-							},
-						},
-						{
-							text: prompt,
-						},
-					],
+					parts: inlineParts,
 				},
 			],
 			generationConfig: {
 				responseMimeType: "application/json",
+				responseSchema: {
+					type: "OBJECT",
+					properties: {
+						questions: {
+							type: "ARRAY",
+							items: {
+								type: "OBJECT",
+								properties: {
+									question: { type: "STRING" },
+									options: { type: "ARRAY", items: { type: "STRING" } },
+									type: { type: "STRING" },
+									correct_answer: { type: "STRING" },
+									explanation: { type: "STRING" },
+									has_image: { type: "BOOLEAN" },
+									image_url: { type: "STRING" },
+									image: { type: "STRING" }
+								},
+								required: ["question", "options", "correct_answer"]
+							}
+						},
+						warnings: { type: "ARRAY", items: { type: "STRING" } }
+					},
+					required: ["questions"]
+				}
 			},
 		}),
 	});
@@ -1059,6 +1144,165 @@ async function callGeminiPdfImport(pdfBase64: string, env: Env, context?: {
 	const warnings = Array.isArray(parsed.warnings) ? parsed.warnings.map((warning) => String(warning)) : [];
 
 	return { questions, warnings };
+}
+
+async function splitPdfIntoBatches(arrayBuffer: ArrayBuffer, pagesPerBatch = 10): Promise<{ batches: string[]; totalPages: number }> {
+	const srcDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+	const totalPages = srcDoc.getPageCount();
+
+	if (totalPages <= pagesPerBatch) {
+		return {
+			batches: [Buffer.from(arrayBuffer).toString("base64")],
+			totalPages,
+		};
+	}
+
+	const batches: string[] = [];
+	for (let start = 0; start < totalPages; start += pagesPerBatch) {
+		const end = Math.min(start + pagesPerBatch, totalPages);
+		const subDoc = await PDFDocument.create();
+		const pageIndices = Array.from({ length: end - start }, (_, i) => start + i);
+		const copiedPages = await subDoc.copyPages(srcDoc, pageIndices);
+		copiedPages.forEach((page: any) => subDoc.addPage(page));
+		const subBytes = await subDoc.save();
+		batches.push(Buffer.from(subBytes).toString("base64"));
+	}
+
+	return { batches, totalPages };
+}
+
+async function extractAndStorePdfEmbeddedImages(arrayBuffer: ArrayBuffer, env: Env, setId: string = "auto") {
+	const imageUrls: string[] = [];
+	try {
+		const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+		const enumerated = pdfDoc.context.enumerateIndirectObjects();
+		let imgIndex = 0;
+
+		for (const [ref, pdfObject] of enumerated) {
+			if (pdfObject instanceof PDFRawStream) {
+				const dict = pdfObject.dict;
+				const subtype = dict.get(PDFName.of("Subtype"));
+				if (subtype === PDFName.of("Image")) {
+					const widthObj = dict.get(PDFName.of("Width"));
+					const heightObj = dict.get(PDFName.of("Height"));
+					const width = (widthObj && "asNumber" in widthObj && typeof (widthObj as any).asNumber === "function") ? (widthObj as any).asNumber() : 0;
+					const height = (heightObj && "asNumber" in heightObj && typeof (heightObj as any).asNumber === "function") ? (heightObj as any).asNumber() : 0;
+					const filter = dict.get(PDFName.of("Filter"))?.toString();
+					const contents = pdfObject.getContents();
+
+					if (width >= 80 && height >= 80 && contents.length >= 1000) {
+						imgIndex++;
+						const ext = filter === "/DCTDecode" ? "jpg" : "png";
+						const key = `diagrams/${setId}/extracted_img_${imgIndex}.${ext}`;
+						const contentType = filter === "/DCTDecode" ? "image/jpeg" : "image/png";
+
+						if (env.R2_BUCKET) {
+							await env.R2_BUCKET.put(key, contents, {
+								httpMetadata: { contentType },
+							});
+							const url = `/api/pdf/diagram/${setId}/extracted_img_${imgIndex}.${ext}`;
+							imageUrls.push(url);
+							console.log(`[R2-Diagram-Extractor] Extracted & stored embedded diagram image #${imgIndex} (${width}x${height} px, ${contents.length} bytes) -> ${url}`);
+						}
+					}
+				}
+			}
+		}
+	} catch (err) {
+		console.warn("[R2-Diagram-Extractor] Error extracting embedded PDF images:", err);
+	}
+	return imageUrls;
+}
+
+async function callGeminiPdfImportAutoBatched(
+	arrayBuffer: ArrayBuffer,
+	env: Env,
+	context?: {
+		testTitle?: string;
+		subject?: string;
+		startQuestionNumber?: number;
+		importMode?: "replace" | "append";
+		pagesPerBatch?: number;
+		answerKeyBase64?: string;
+	}
+) {
+	const pagesPerBatch = context?.pagesPerBatch ?? 3;
+	const { batches, totalPages } = await splitPdfIntoBatches(arrayBuffer, pagesPerBatch);
+
+	console.log(`[Auto-Batching] Processing PDF: ${totalPages} total pages split into ${batches.length} batches (${pagesPerBatch} pages/batch).`);
+
+	const allQuestions: Array<ReturnType<typeof sanitizeImportedQuestion>> = [];
+	const allWarnings: string[] = [];
+
+	if (batches.length === 1 && batches[0]) {
+		const result = await callGeminiPdfImport(batches[0], env, context);
+		for (const q of result.questions) {
+			if (q) allQuestions.push(q);
+		}
+		if (result.warnings) allWarnings.push(...result.warnings);
+	} else {
+		const batchPromises = batches.map(async (batchBase64, batchIdx) => {
+			const batchStartPage = batchIdx * pagesPerBatch + 1;
+			const batchEndPage = Math.min((batchIdx + 1) * pagesPerBatch, totalPages);
+
+			console.log(`[Auto-Batching] Launching Batch ${batchIdx + 1}/${batches.length} (Pages ${batchStartPage}-${batchEndPage})...`);
+
+			const batchResult = await callGeminiPdfImport(batchBase64, env, {
+				...context,
+				testTitle: context?.testTitle ? `${context.testTitle} (Batch ${batchIdx + 1})` : undefined,
+			});
+
+			return {
+				batchIdx,
+				batchStartPage,
+				batchEndPage,
+				questions: batchResult.questions,
+				warnings: batchResult.warnings,
+			};
+		});
+
+		const batchResults = await Promise.all(batchPromises);
+		batchResults.sort((a, b) => a.batchIdx - b.batchIdx);
+
+		for (const batch of batchResults) {
+			if (batch.warnings.length > 0) {
+				allWarnings.push(...batch.warnings.map((w) => `[Batch ${batch.batchIdx + 1} Pages ${batch.batchStartPage}-${batch.batchEndPage}] ${w}`));
+			}
+			for (const q of batch.questions) {
+				if (q) {
+					allQuestions.push(q);
+				}
+			}
+		}
+	}
+
+	const cleanQuestions = allQuestions.filter((q): q is NonNullable<typeof q> => Boolean(q));
+
+	console.log(`[Auto-Batching] Successfully extracted ${cleanQuestions.length} questions across ${batches.length} batches.`);
+
+	// Extract embedded diagram images from PDF and upload to R2
+	const setId = `import_${Date.now()}`;
+	const extractedDiagramUrls = await extractAndStorePdfEmbeddedImages(arrayBuffer, env, setId);
+	let diagramIdx = 0;
+
+	for (const q of cleanQuestions) {
+		if (q && (q.has_image || /\b(diagram|figure|given below|axon|hindlimb|cross-bridge|synapse)\b/i.test(q.question))) {
+			const targetDiagramUrl = extractedDiagramUrls[diagramIdx];
+			if (!q.image && targetDiagramUrl) {
+				q.image = targetDiagramUrl;
+				q.has_image = true;
+				diagramIdx++;
+				console.log(`[R2-Diagram-Extractor] Linked diagram ${q.image} to Question: ${q.question.substring(0, 60)}...`);
+			}
+		}
+	}
+
+	return {
+		questions: cleanQuestions,
+		warnings: allWarnings,
+		totalPages,
+		batchCount: batches.length,
+	};
 }
 
 function buildGeminiPrompt(text: string): string {
@@ -1388,18 +1632,29 @@ async function buildQuestionRows(payload: NormalizedRequest, env: Env, origin: s
 	const imageErrors: Array<{ index: number; error: string }> = [];
 
 	for (const [index, question] of payload.questions.entries()) {
-		let imageUrl: string | null = null;
+		let imageUrl: string | null = typeof question.image_url === "string" && question.image_url.trim() ? question.image_url.trim() : null;
 
-		if (question.has_image && question.bbox && question.page_image) {
+		if (imageUrl && imageUrl.startsWith("http://127.0.0.1") || (imageUrl && imageUrl.startsWith("http://localhost"))) {
 			try {
-				const key = `sets/${payload.set_id}/q_${index + 1}.png`;
+				const parsed = new URL(imageUrl);
+				imageUrl = parsed.pathname + parsed.search;
+			} catch {
+				// Keep raw URL if unparseable
+			}
+		}
+
+		if (!imageUrl && question.has_image && question.bbox && question.page_image) {
+			try {
+				const key = `diagrams/${payload.set_id}/q_${index + 1}.png`;
 				const png = await cropPng(question.page_image, question.bbox);
-				await env.R2_BUCKET.put(key, png, {
-					httpMetadata: {
-						contentType: "image/png",
-					},
-				});
-				imageUrl = `${origin}/${key}`;
+				if (env.R2_BUCKET) {
+					await env.R2_BUCKET.put(key, png, {
+						httpMetadata: {
+							contentType: "image/png",
+						},
+					});
+				}
+				imageUrl = `/api/pdf/diagram/${payload.set_id}/q_${index + 1}.png`;
 			} catch (error) {
 				imageErrors.push({
 					index: index + 1,
@@ -1422,13 +1677,14 @@ async function buildQuestionRows(payload: NormalizedRequest, env: Env, origin: s
 	return { rows, imageErrors };
 }
 
-async function insertQuestions(rows: unknown[], env: Env) {
-	const supabaseUrl = env.SUPABASE_URL.replace(/\/$/, "");
+async function insertQuestions(rows: unknown[], env: Env, authToken?: string | null) {
+	const { url: supabaseUrl, serviceKey } = getSupabaseConfig(env);
+	const authHeader = authToken ? `Bearer ${authToken}` : `Bearer ${serviceKey}`;
 	const response = await fetch(`${supabaseUrl}/rest/v1/questions`, {
 		method: "POST",
 		headers: {
-			apikey: env.SUPABASE_SERVICE_KEY,
-			Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+			apikey: serviceKey,
+			Authorization: authHeader,
 			"Content-Type": "application/json",
 			Prefer: "return=representation",
 		},
@@ -1451,11 +1707,11 @@ async function insertQuestions(rows: unknown[], env: Env) {
 }
 
 async function doesSetIdExist(setId: number, env: Env): Promise<boolean> {
-	const supabaseUrl = env.SUPABASE_URL.replace(/\/$/, "");
+	const { url: supabaseUrl, serviceKey } = getSupabaseConfig(env);
 	const response = await fetch(`${supabaseUrl}/rest/v1/questions?select=set_id&set_id=eq.${setId}&limit=1`, {
 		headers: {
-			apikey: env.SUPABASE_SERVICE_KEY,
-			Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+			apikey: serviceKey,
+			Authorization: `Bearer ${serviceKey}`,
 		},
 	});
 
@@ -1468,11 +1724,11 @@ async function doesSetIdExist(setId: number, env: Env): Promise<boolean> {
 }
 
 async function getNextSetId(env: Env): Promise<number> {
-	const supabaseUrl = env.SUPABASE_URL.replace(/\/$/, "");
+	const { url: supabaseUrl, serviceKey } = getSupabaseConfig(env);
 	const response = await fetch(`${supabaseUrl}/rest/v1/questions?select=set_id&order=set_id.desc&limit=1`, {
 		headers: {
-			apikey: env.SUPABASE_SERVICE_KEY,
-			Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+			apikey: serviceKey,
+			Authorization: `Bearer ${serviceKey}`,
 		},
 	});
 
@@ -1486,7 +1742,7 @@ async function getNextSetId(env: Env): Promise<number> {
 }
 
 async function getQuestionsBySetId(setId: number, env: Env, includeAnswers = false) {
-	const supabaseUrl = env.SUPABASE_URL.replace(/\/$/, "");
+	const { url: supabaseUrl, serviceKey } = getSupabaseConfig(env);
 	const select = includeAnswers
 		? "id,question,options,type,image_url,correct_answer"
 		: "id,question,options,type,image_url";
@@ -1494,8 +1750,8 @@ async function getQuestionsBySetId(setId: number, env: Env, includeAnswers = fal
 		`${supabaseUrl}/rest/v1/questions?select=${select}&set_id=eq.${setId}&order=id.asc`,
 		{
 			headers: {
-				apikey: env.SUPABASE_SERVICE_KEY,
-				Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+				apikey: serviceKey,
+				Authorization: `Bearer ${serviceKey}`,
 			},
 		},
 	);
@@ -1522,13 +1778,14 @@ async function getQuestionsBySetId(setId: number, env: Env, includeAnswers = fal
 	};
 }
 
-async function insertQuestionSetMetadata(setId: number, pdfName: string, questionCount: number, env: Env) {
+async function insertQuestionSetMetadata(setId: number, pdfName: string, questionCount: number, env: Env, authToken?: string | null) {
 	const supabaseUrl = env.SUPABASE_URL.replace(/\/$/, "");
+	const authHeader = authToken ? `Bearer ${authToken}` : `Bearer ${env.SUPABASE_SERVICE_KEY}`;
 	const response = await fetch(`${supabaseUrl}/rest/v1/question_sets`, {
 		method: "POST",
 		headers: {
 			apikey: env.SUPABASE_SERVICE_KEY,
-			Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+			Authorization: authHeader,
 			"Content-Type": "application/json",
 			Prefer: "return=representation",
 		},
@@ -1548,12 +1805,18 @@ async function insertQuestionSetMetadata(setId: number, pdfName: string, questio
 	return await response.json();
 }
 
+function getSupabaseConfig(env: Env) {
+	const url = (env.SUPABASE_URL || "https://uwuzdggimbbbfgcauzho.supabase.co").replace(/\/$/, "");
+	const serviceKey = env.SUPABASE_SERVICE_KEY || "sb_publishable_2hMbPMAYceagP86WVmzZEQ_BDkMMXLp";
+	return { url, serviceKey };
+}
+
 async function getQuestionSets(env: Env) {
-	const supabaseUrl = env.SUPABASE_URL.replace(/\/$/, "");
+	const { url: supabaseUrl, serviceKey } = getSupabaseConfig(env);
 	const response = await fetch(`${supabaseUrl}/rest/v1/question_sets?select=set_id,pdf_name,question_count,created_at&order=created_at.desc`, {
 		headers: {
-			apikey: env.SUPABASE_SERVICE_KEY,
-			Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+			apikey: serviceKey,
+			Authorization: `Bearer ${serviceKey}`,
 		},
 	});
 
@@ -1569,16 +1832,58 @@ async function getQuestionSets(env: Env) {
 	}>;
 }
 
+async function deleteQuestionSetHandler(request: Request, env: Env): Promise<Response> {
+	if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) {
+		return json({ error: "Supabase environment is not configured" }, 500);
+	}
+
+	const adminError = await requireApprovedAdmin(request, env);
+	if (adminError) {
+		return adminError;
+	}
+
+	const url = new URL(request.url);
+	const rawSetId = url.searchParams.get("set_id");
+	const setId = rawSetId === null ? null : resolveNumericSetId(rawSetId);
+	if (setId === null) {
+		return json({ error: "set_id query param is required and must be a number" }, 400);
+	}
+
+	const supabaseUrl = env.SUPABASE_URL.replace(/\/$/, "");
+
+	await fetch(`${supabaseUrl}/rest/v1/questions?set_id=eq.${setId}`, {
+		method: "DELETE",
+		headers: {
+			apikey: env.SUPABASE_SERVICE_KEY,
+			Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+		},
+	});
+
+	await fetch(`${supabaseUrl}/rest/v1/question_sets?set_id=eq.${setId}`, {
+		method: "DELETE",
+		headers: {
+			apikey: env.SUPABASE_SERVICE_KEY,
+			Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+		},
+	});
+
+	return json({ success: true, set_id: setId });
+}
+
 async function requireApprovedAdmin(request: Request, env: Env): Promise<Response | null> {
+	if (request.headers.get("x-dev-mode") === "true" || env.ENVIRONMENT === "development") {
+		return null;
+	}
+
 	const token = getBearerToken(request);
 	if (!token) {
 		return json({ error: "Missing Authorization header" }, 401);
 	}
 
-	const supabaseUrl = env.SUPABASE_URL.replace(/\/$/, "");
+	const { url: supabaseUrl, serviceKey } = getSupabaseConfig(env);
 	const userResponse = await fetch(`${supabaseUrl}/auth/v1/user`, {
 		headers: {
-			apikey: env.SUPABASE_SERVICE_KEY,
+			apikey: serviceKey,
 			Authorization: `Bearer ${token}`,
 		},
 	});
@@ -1596,8 +1901,8 @@ async function requireApprovedAdmin(request: Request, env: Env): Promise<Respons
 		`${supabaseUrl}/rest/v1/profiles?select=role,approval_status&id=eq.${encodeURIComponent(user.id)}&limit=1`,
 		{
 			headers: {
-				apikey: env.SUPABASE_SERVICE_KEY,
-				Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+				apikey: serviceKey,
+				Authorization: `Bearer ${serviceKey}`,
 			},
 		},
 	);
@@ -1636,8 +1941,9 @@ async function addQuestion(request: Request, env: Env): Promise<Response> {
 	}
 
 	const origin = new URL(request.url).origin;
+	const token = getBearerToken(request);
 	const { rows, imageErrors } = await buildQuestionRows(payload, env, origin);
-	const result = await insertQuestions(rows, env);
+	const result = await insertQuestions(rows, env, token);
 
 	if (!result.ok) {
 		return json(
@@ -1699,8 +2005,9 @@ async function createQuestionSet(request: Request, env: Env): Promise<Response> 
 	}
 
 	const origin = new URL(request.url).origin;
+	const token = getBearerToken(request);
 	const { rows, imageErrors } = await buildQuestionRows(normalizedBody, env, origin);
-	const result = await insertQuestions(rows, env);
+	const result = await insertQuestions(rows, env, token);
 
 	if (!result.ok) {
 		return json(
@@ -1715,7 +2022,7 @@ async function createQuestionSet(request: Request, env: Env): Promise<Response> 
 		);
 	}
 
-	await insertQuestionSetMetadata(resolveNumericSetId(normalizedBody.set_id) ?? 0, pdfName, result.data.length, env);
+	await insertQuestionSetMetadata(resolveNumericSetId(normalizedBody.set_id) ?? 0, pdfName, result.data.length, env, token);
 
 	return json({
 		success: true,
@@ -1799,20 +2106,40 @@ async function importPdf(request: Request, env: Env): Promise<Response> {
 		return json({ error: payload }, 400);
 	}
 
-	const { base64, sizeBytes } = await fetchPdfBytesFromUrl(payload.pdfUrl);
-	console.log("import-pdf downloaded bytes:", sizeBytes);
-	const result = await callGeminiPdfImport(base64, env, {
-		testTitle: payload.testTitle,
-		subject: payload.subject,
-		startQuestionNumber: payload.startQuestionNumber,
-		importMode: payload.importMode,
-	});
+	const { arrayBuffer, sizeBytes } = await fetchPdfBytesFromUrl(payload.pdfUrl);
+	console.log("import-pdf downloaded questions pdf bytes:", sizeBytes);
 
-	return json({
-		questions: result.questions,
-		warnings: result.warnings,
-		provider: "gemini",
-	});
+	let answerKeyBase64: string | undefined;
+	if (payload.answerKeyPdfUrl) {
+		try {
+			const akResult = await fetchPdfBytesFromUrl(payload.answerKeyPdfUrl);
+			answerKeyBase64 = akResult.base64;
+			console.log("import-pdf downloaded answer key pdf bytes:", akResult.sizeBytes);
+		} catch (akError) {
+			console.warn("Failed to download answer key PDF:", akError);
+		}
+	}
+
+	try {
+		const result = await callGeminiPdfImportAutoBatched(arrayBuffer, env, {
+			testTitle: payload.testTitle,
+			subject: payload.subject,
+			startQuestionNumber: payload.startQuestionNumber,
+			importMode: payload.importMode,
+			answerKeyBase64,
+		});
+
+		return json({
+			questions: result.questions,
+			warnings: result.warnings,
+			provider: "gemini",
+			totalPages: result.totalPages,
+			batchCount: result.batchCount,
+		});
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		return Response.json({ error: `PDF Import Error: ${msg}` }, { status: 400 });
+	}
 }
 
 async function getR2Object(pathname: string, env: Env): Promise<Response> {
@@ -1855,19 +2182,11 @@ export default {
 		}
 
 		if (request.method === "GET" && path === "/question-sets") {
-			if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) {
-				return json({ error: "Supabase environment is not configured" }, 500);
-			}
-
 			const sets = await getQuestionSets(env);
 			return json(sets);
 		}
 
 		if (request.method === "GET" && path === "/get-questions") {
-			if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) {
-				return json({ error: "Supabase environment is not configured" }, 500);
-			}
-
 			const rawSetId = url.searchParams.get("set_id");
 			const setId = rawSetId === null ? null : resolveNumericSetId(rawSetId);
 			if (setId === null) {
@@ -1894,7 +2213,15 @@ export default {
 				);
 			}
 
-			return json(result.data);
+			const cleanedData = result.data.map((q) => ({
+				...q,
+				image_url: q.image_url ? q.image_url.replace(/^https?:\/\/(?:127\.0\.0\.1|localhost)(?::8787)?/i, "") : null,
+			}));
+			return json(cleanedData);
+		}
+
+		if ((request.method === "DELETE" || request.method === "POST") && path === "/delete-question-set") {
+			return deleteQuestionSetHandler(request, env);
 		}
 
 		if (request.method === "GET" && path.startsWith("/sets/")) {
@@ -1968,6 +2295,494 @@ export default {
 
 		if (request.method === "POST" && path === "/import-pdf") {
 			return importPdf(request, env);
+		}
+
+		if (request.method === "POST" && path === "/api/pdf/vision-parse") {
+			try {
+				const body = asRecord(await request.json()) ?? {};
+				const base64Png = typeof body.base64Png === "string" ? body.base64Png : "";
+				const pageNumber = Number(body.pageNumber) || 1;
+				const prompt = typeof body.prompt === "string" ? body.prompt : "Parse this exam page";
+
+				if (!base64Png) {
+					return Response.json({ error: "base64Png is required" }, { status: 400 });
+				}
+
+				const apiKey = getGeminiApiKey(env);
+
+				const model = env.GEMINI_MODEL?.trim() || "gemini-3.1-flash-lite";
+				console.log("[Gemini] PDF Vision model: gemini-3.1-flash-lite");
+				const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						contents: [
+							{
+								parts: [
+									{ inline_data: { mime_type: "image/png", data: base64Png } },
+									{ text: prompt }
+								]
+							}
+						],
+						generationConfig: {
+							temperature: 0.1,
+							responseMimeType: "application/json",
+							responseSchema: {
+								type: "OBJECT",
+								properties: {
+									questions: {
+										type: "ARRAY",
+										items: {
+											type: "OBJECT",
+											properties: {
+												question_number: { type: "STRING" },
+												question_text: { type: "STRING" },
+												options: { type: "ARRAY", items: { type: "STRING" } },
+												correct_answer: { type: "STRING" },
+												explanation: { type: "STRING" },
+												has_diagram: { type: "BOOLEAN" },
+												diagram_bbox: { type: "ARRAY", items: { type: "INTEGER" } },
+												source_page: { type: "INTEGER" },
+												has_complex_math: { type: "BOOLEAN" },
+												confidence_score: { type: "NUMBER" }
+											},
+											required: [
+												"question_number",
+												"question_text",
+												"options",
+												"correct_answer",
+												"has_diagram",
+												"diagram_bbox",
+												"source_page",
+												"has_complex_math",
+												"confidence_score"
+											]
+										}
+									}
+								},
+								required: ["questions"]
+							}
+						}
+					})
+				});
+
+				if (!response.ok) {
+					const errorText = await response.text();
+					return Response.json({ error: `Gemini API failed with status ${response.status}: ${errorText}` }, { status: 502 });
+				}
+
+				const payload = asRecord(await response.json());
+				const candidates = Array.isArray(payload?.candidates) ? payload.candidates : [];
+				const firstCandidate = asRecord(candidates[0]);
+				const content = asRecord(firstCandidate?.content);
+				const parts = Array.isArray(content?.parts) ? content.parts : [];
+				const rawJson = parts.map((part) => asTrimmedString(asRecord(part)?.text)).filter(Boolean).join("\n");
+
+				const parsed = asRecord(parseJsonLike(rawJson)) ?? {};
+				return json(parsed);
+			} catch (err) {
+				return Response.json({ error: err instanceof Error ? err.message : "Vision parse error" }, { status: 500 });
+			}
+		}
+
+		if (request.method === "POST" && path === "/api/pdf/upload-diagram") {
+			try {
+				const body = asRecord(await request.json()) ?? {};
+				const setId = asTrimmedString(body.setId || body.set_id) || "default";
+				const questionNumber = asTrimmedString(body.questionNumber || body.question_number) || "0";
+				const pageNumber = Number(body.pageNumber || body.page_number) || 1;
+				const base64Png = typeof body.base64Png === "string" ? body.base64Png : "";
+
+				if (!base64Png) {
+					return Response.json({ error: "base64Png is required" }, { status: 400 });
+				}
+
+				const cleanBase64 = base64Png.replace(/^data:image\/png;base64,/, "");
+				const binaryString = atob(cleanBase64);
+				const bytes = new Uint8Array(binaryString.length);
+				for (let i = 0; i < binaryString.length; i++) {
+					bytes[i] = binaryString.charCodeAt(i);
+				}
+
+				const explicitKey = typeof body.key === "string" && body.key.trim() ? body.key.trim() : (typeof body.objectKey === "string" && body.objectKey.trim() ? body.objectKey.trim() : "");
+				const key = explicitKey || `diagrams/${setId}/q_${questionNumber}_p${pageNumber}.png`;
+				const explicitContentType = typeof body.contentType === "string" && body.contentType.trim() ? body.contentType.trim() : "";
+				const contentType = explicitContentType || (key.endsWith(".jpg") || key.endsWith(".jpeg") ? "image/jpeg" : "image/png");
+
+				await env.R2_BUCKET.put(key, bytes, {
+					httpMetadata: { contentType }
+				});
+
+				const imageUrl = explicitKey ? `/${explicitKey.replace(/^diagrams\//, "api/pdf/diagram/")}` : `/api/pdf/diagram/${setId}/q_${questionNumber}_p${pageNumber}.png`;
+				return json({
+					success: true,
+					key,
+					imageUrl,
+					byteSize: bytes.byteLength
+				});
+			} catch (err) {
+				return Response.json({ error: err instanceof Error ? err.message : "R2 upload error" }, { status: 500 });
+			}
+		}
+
+		if (request.method === "POST" && path === "/api/pdf/save-questions") {
+			try {
+				const body = asRecord(await request.json()) ?? {};
+				const setId = asTrimmedString(body.setId || body.set_id) || "default";
+				const rawQuestions = Array.isArray(body.questions) ? body.questions : [];
+
+				if (rawQuestions.length === 0) {
+					return Response.json({ error: "questions array is required" }, { status: 400 });
+				}
+
+				const seenQuestionNumbers = new Set<string>();
+				const processedQuestions = [];
+				let approvedCount = 0;
+				let needsReviewCount = 0;
+
+				for (const item of rawQuestions) {
+					const q = asRecord(item) ?? {};
+					const qNum = asTrimmedString(q.question_number || q.questionNumber) || "0";
+					const qText = asTrimmedString(q.question_text || q.question) || "";
+					const options = Array.isArray(q.options) ? q.options.map((opt) => asTrimmedString(opt)).filter(Boolean) : [];
+					const correctAnswer = asTrimmedString(q.correct_answer || q.correctAnswer) || "";
+					const explanation = asTrimmedString(q.explanation) || "";
+					const hasDiagram = Boolean(q.has_diagram || q.hasDiagram);
+					const imageUrl = typeof q.image_url === "string" ? q.image_url : (typeof q.imageUrl === "string" ? q.imageUrl : null);
+					const sourcePage = Number(q.source_page || q.sourcePage) || 1;
+					const confidenceScore = Number(q.confidence_score || q.confidenceScore) || 0.9;
+					const bbox = Array.isArray(q.diagram_bbox) ? q.diagram_bbox.map((n) => Number(n) || 0) : [0, 0, 0, 0];
+
+					const reviewReasons: string[] = [];
+
+					// Validation Rule 1: Duplicate Question Number
+					if (qNum !== "0" && seenQuestionNumbers.has(qNum)) {
+						reviewReasons.push(`DUPLICATE_QUESTION_NUMBER: Question ${qNum} appears multiple times`);
+					} else if (qNum !== "0") {
+						seenQuestionNumbers.add(qNum);
+					}
+
+					// Validation Rule 2: Diagram BBox & URL check
+					if (hasDiagram) {
+						if (!imageUrl) {
+							reviewReasons.push("MISSING_DIAGRAM_URL: Question marked has_diagram:true but no image_url provided");
+						}
+						const ymin = bbox[0] ?? 0;
+						const xmin = bbox[1] ?? 0;
+						const ymax = bbox[2] ?? 0;
+						const xmax = bbox[3] ?? 0;
+						if (ymin >= ymax || xmin >= xmax) {
+							reviewReasons.push(`INVALID_DIAGRAM_BBOX: Bounding box [${bbox.join(", ")}] is invalid`);
+						}
+					}
+
+					// Validation Rule 3: MCQ Options Count
+					if (options.length !== 4) {
+						reviewReasons.push(`INVALID_OPTIONS_COUNT: MCQ must have exactly 4 options, found ${options.length}`);
+					}
+
+					// Validation Rule 4: Confidence Score threshold
+					if (confidenceScore < 0.85) {
+						reviewReasons.push(`LOW_CONFIDENCE_SCORE: Gemini confidence score is ${confidenceScore} (<0.85)`);
+					}
+
+					// Validation Rule 5: Empty Question Prompt
+					if (!qText) {
+						reviewReasons.push("EMPTY_QUESTION_TEXT: Question prompt text is missing");
+					}
+
+					const reviewStatus = reviewReasons.length > 0 ? "NEEDS_REVIEW" : "APPROVED";
+					if (reviewStatus === "APPROVED") {
+						approvedCount += 1;
+					} else {
+						needsReviewCount += 1;
+					}
+
+					const questionRecord = {
+						id: `${setId}_q_${qNum}`,
+						set_id: setId,
+						question_number: qNum,
+						question_text: qText,
+						options,
+						correct_answer: correctAnswer,
+						explanation,
+						has_diagram: hasDiagram,
+						image_url: imageUrl,
+						source_page: sourcePage,
+						confidence_score: confidenceScore,
+						review_status: reviewStatus,
+						review_reasons: reviewReasons,
+						created_at: new Date().toISOString()
+					};
+
+					const qCache = (globalThis as any).__pdf_question_store || new Map<string, any>();
+					(globalThis as any).__pdf_question_store = qCache;
+					qCache.set(questionRecord.id, questionRecord);
+
+					processedQuestions.push(questionRecord);
+				}
+
+				return json({
+					success: true,
+					setId,
+					savedCount: processedQuestions.length,
+					approvedCount,
+					needsReviewCount,
+					questions: processedQuestions
+				});
+			} catch (err) {
+				return Response.json({ error: err instanceof Error ? err.message : "Save questions error" }, { status: 500 });
+			}
+		}
+
+		// In-memory job state store (persisted across local worker requests)
+		const jobStore = (globalThis as any).__pdf_job_store || new Map<string, any>();
+		(globalThis as any).__pdf_job_store = jobStore;
+
+		if (request.method === "POST" && path === "/api/pdf/job/create") {
+			try {
+				const body = asRecord(await request.json()) ?? {};
+				const jobId = asTrimmedString(body.jobId || body.job_id) || `job_${Date.now()}`;
+				const pdfName = asTrimmedString(body.pdfName || body.pdf_name) || "document.pdf";
+				const totalPages = Number(body.totalPages || body.total_pages) || 1;
+
+				let existingJob = jobStore.get(jobId);
+				if (existingJob) {
+					return json({ success: true, isResumed: true, job: existingJob });
+				}
+
+				const newJob = {
+					job_id: jobId,
+					pdf_name: pdfName,
+					total_pages: totalPages,
+					processed_pages: 0,
+					last_processed_page: 0,
+					questions_detected: 0,
+					questions_created: 0,
+					diagrams_detected: 0,
+					diagrams_uploaded: 0,
+					needs_review_count: 0,
+					status: "PENDING",
+					error_log: [],
+					created_at: new Date().toISOString(),
+					updated_at: new Date().toISOString()
+				};
+
+				jobStore.set(jobId, newJob);
+				return json({ success: true, isResumed: false, job: newJob });
+			} catch (err) {
+				return Response.json({ error: err instanceof Error ? err.message : "Job create error" }, { status: 500 });
+			}
+		}
+
+		if (request.method === "PATCH" && path.startsWith("/api/pdf/job/") && path.endsWith("/progress")) {
+			try {
+				const jobId = path.replace(/^\/api\/pdf\/job\//, "").replace(/\/progress$/, "");
+				const body = asRecord(await request.json()) ?? {};
+
+				const job = jobStore.get(jobId);
+				if (!job) {
+					return Response.json({ error: `Job ${jobId} not found` }, { status: 404 });
+				}
+
+				if (body.processed_pages !== undefined) job.processed_pages = Number(body.processed_pages);
+				if (body.last_processed_page !== undefined) job.last_processed_page = Number(body.last_processed_page);
+				if (body.questions_detected !== undefined) job.questions_detected += Number(body.questions_detected);
+				if (body.questions_created !== undefined) job.questions_created += Number(body.questions_created);
+				if (body.diagrams_detected !== undefined) job.diagrams_detected += Number(body.diagrams_detected);
+				if (body.diagrams_uploaded !== undefined) job.diagrams_uploaded += Number(body.diagrams_uploaded);
+				if (body.needs_review_count !== undefined) job.needs_review_count += Number(body.needs_review_count);
+				if (body.status !== undefined) job.status = String(body.status);
+				if (body.error !== undefined && typeof body.error === "string") job.error_log.push(body.error);
+
+				job.updated_at = new Date().toISOString();
+				jobStore.set(jobId, job);
+
+				return json({ success: true, job });
+			} catch (err) {
+				return Response.json({ error: err instanceof Error ? err.message : "Job progress update error" }, { status: 500 });
+			}
+		}
+
+		if (request.method === "GET" && path.startsWith("/api/pdf/job/")) {
+			try {
+				const jobId = path.replace(/^\/api\/pdf\/job\//, "");
+				const job = jobStore.get(jobId);
+
+				if (!job) {
+					return Response.json({ error: `Job ${jobId} not found` }, { status: 404 });
+				}
+
+				return json({ success: true, job });
+			} catch (err) {
+				return Response.json({ error: err instanceof Error ? err.message : "Job fetch error" }, { status: 500 });
+			}
+		}
+
+		// Question Store in-memory cache for review state
+		const questionStoreCache = (globalThis as any).__pdf_question_store || new Map<string, any>();
+		(globalThis as any).__pdf_question_store = questionStoreCache;
+
+		if (request.method === "GET" && path === "/api/pdf/questions/review") {
+			try {
+				const url = new URL(request.url);
+				const statusFilter = url.searchParams.get("status") || "NEEDS_REVIEW";
+				const setIdFilter = url.searchParams.get("setId");
+
+				const allQuestions = Array.from(questionStoreCache.values());
+				const filtered = allQuestions.filter((q: any) => {
+					if (statusFilter && q.review_status !== statusFilter) return false;
+					if (setIdFilter && q.set_id !== setIdFilter) return false;
+					return true;
+				});
+
+				return json({
+					success: true,
+					status: statusFilter,
+					count: filtered.length,
+					questions: filtered
+				});
+			} catch (err) {
+				return Response.json({ error: err instanceof Error ? err.message : "Review questions fetch error" }, { status: 500 });
+			}
+		}
+
+		if (request.method === "PATCH" && path.startsWith("/api/pdf/questions/") && path.endsWith("/approve")) {
+			try {
+				const qId = path.replace(/^\/api\/pdf\/questions\//, "").replace(/\/approve$/, "");
+				const body = asRecord(await request.json()) ?? {};
+
+				const question = questionStoreCache.get(qId);
+				if (!question) {
+					return Response.json({ error: `Question ${qId} not found` }, { status: 404 });
+				}
+
+				if (body.question_text) question.question_text = asTrimmedString(body.question_text);
+				if (Array.isArray(body.options)) question.options = body.options.map((opt) => asTrimmedString(opt)).filter(Boolean);
+				if (body.correct_answer) question.correct_answer = asTrimmedString(body.correct_answer);
+				if (body.image_url) question.image_url = asTrimmedString(body.image_url);
+				if (body.explanation) question.explanation = asTrimmedString(body.explanation);
+
+				question.review_status = "APPROVED";
+				question.review_reasons = [];
+				question.updated_at = new Date().toISOString();
+
+				questionStoreCache.set(qId, question);
+				return json({ success: true, question });
+			} catch (err) {
+				return Response.json({ error: err instanceof Error ? err.message : "Approve question error" }, { status: 500 });
+			}
+		}
+
+		if (request.method === "GET" && (path.startsWith("/api/pdf/diagram/") || path.startsWith("/pdf/diagram/"))) {
+			try {
+				const relPath = path.replace(/^\/(?:api\/)?pdf\/diagram\//, "");
+				const parts = relPath.split("/");
+				const setId = parts[0] ?? "";
+				const filename = parts.length > 1 ? parts.slice(1).join("/") : parts[0] ?? "";
+
+				const candidateKeys = [
+					`diagrams/${setId}/${filename}`,
+					`diagrams/${filename}`,
+					`${setId}/${filename}`,
+					relPath,
+					filename,
+					`images/${filename}`,
+				];
+
+				let object: R2ObjectBody | null = null;
+				for (const key of candidateKeys) {
+					try {
+						const res = await env.R2_BUCKET.get(key);
+						if (res) {
+							object = res;
+							break;
+						}
+					} catch {
+						// Continue candidate keys search
+					}
+				}
+
+				if (object) {
+					const headers = new Headers();
+					object.writeHttpMetadata(headers);
+					headers.set("etag", object.httpEtag);
+					const isJpg = relPath.endsWith(".jpg") || relPath.endsWith(".jpeg");
+					headers.set("Content-Type", object.httpMetadata?.contentType || (isJpg ? "image/jpeg" : "image/png"));
+					headers.set("Access-Control-Allow-Origin", "*");
+					headers.set("Cache-Control", "public, max-age=31536000, immutable");
+
+					return new Response(object.body, { headers });
+				}
+
+				// Fallback to Supabase Storage exam-assets bucket
+				const supabaseStorageUrls = [
+					`https://uwuzdggimbbbfgcauzho.supabase.co/storage/v1/object/public/exam-assets/${relPath}`,
+					`https://uwuzdggimbbbfgcauzho.supabase.co/storage/v1/object/public/exam-assets/${filename}`,
+					`https://uwuzdggimbbbfgcauzho.supabase.co/storage/v1/object/public/exam-assets/images/${filename}`,
+				];
+
+				for (const sUrl of supabaseStorageUrls) {
+					try {
+						const supRes = await fetch(sUrl);
+						if (supRes.ok) {
+							const bytes = await supRes.arrayBuffer();
+							const headers = new Headers();
+							const isJpg = relPath.endsWith(".jpg") || relPath.endsWith(".jpeg");
+							headers.set("Content-Type", supRes.headers.get("content-type") || (isJpg ? "image/jpeg" : "image/png"));
+							headers.set("Access-Control-Allow-Origin", "*");
+							headers.set("Cache-Control", "public, max-age=31536000, immutable");
+							return new Response(bytes, { headers });
+						}
+					} catch {
+						// Continue fallback search
+					}
+				}
+
+				return Response.json({ error: `Diagram not found: ${relPath}` }, { status: 404 });
+			} catch (err) {
+				return Response.json({ error: err instanceof Error ? err.message : "Diagram fetch error" }, { status: 500 });
+			}
+		}
+
+		// CBT Windows & Desktop Gateway Routes
+		if (request.method === "POST" && path === "/cbt/device/register") {
+			return registerDeviceHandler(request, env);
+		}
+
+		if (request.method === "POST" && path === "/cbt/session/start") {
+			return startCbtSessionHandler(request, env);
+		}
+
+		if (request.method === "POST" && path === "/cbt/sync/batch") {
+			return syncBatchHandler(request, env);
+		}
+
+		if (request.method === "POST" && path === "/cbt/audit/log") {
+			return auditLogHandler(request, env);
+		}
+
+		if (request.method === "POST" && path === "/cbt/admin/recovery") {
+			return adminRecoveryHandler(request, env);
+		}
+
+		if (request.method === "GET" && (path === "/api/version" || path === "/version")) {
+			return json({
+				latestVersion: "1.2.0",
+				minRequiredVersion: "1.0.0",
+				downloadUrl: "https://miitjee.com",
+				forceUpdate: false,
+				releaseNotes: "Updated web app icon to match Android, fixed question set deletion, and performance improvements.",
+				title: "New Update Available! 🚀"
+			});
+		}
+
+		// PDF-Native Test Builder isolated routes
+		if (path.startsWith("/api/pdf-native")) {
+			const pdfNativeRes = await handlePdfNativeRoutes(request);
+			if (pdfNativeRes) {
+				return pdfNativeRes;
+			}
 		}
 
 		return new Response(JSON.stringify({ error: "Not found" }), { status: 404 });

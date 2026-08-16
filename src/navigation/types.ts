@@ -19,8 +19,9 @@ export type RootStackParamList = {
   Terms: undefined;
   Privacy: undefined;
   StudentInsights: undefined;
+  ExamLink: { shareCode: string };
   TestIntro: { testId: string };
-  TestAttempt: { testId: string };
+  TestAttempt: { testId: string; studentName?: string };
   TestResult: { testId: string; resultId: string };
   ReviewAnswers: { testId: string; resultId: string };
   AdminDashboard: undefined;
@@ -33,6 +34,14 @@ export type RootStackParamList = {
   ScholarshipRegistrations: undefined;
   BatchAccessRequests: undefined;
   GeneralEnquiries: undefined;
+  ActivityLogs: undefined;
+  AdminDiagnostics: undefined;
+  PdfNativeTestBuilder: undefined;
+  PdfNativeSetManagement: { setId?: string } | undefined;
+  PdfNativeTestCreator: { testId?: string; setId?: string } | undefined;
+  PdfNativeTestManagement: undefined;
+  PdfNativeResult: { attemptId: string; testId?: string };
+  PdfNativeReview: { attemptId: string; testId?: string };
 };
 
 export type RootStackScreenProps<RouteName extends keyof RootStackParamList> =

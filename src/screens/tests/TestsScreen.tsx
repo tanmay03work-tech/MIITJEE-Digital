@@ -71,12 +71,6 @@ export function TestsScreen() {
   const handleStartTest = useCallback(
     (test: TestItem) => {
       const eligibility = getEligibility(user, test);
-      const existingAttempt = results.find((entry) => entry.userId === user?.id && entry.testId === test.id);
-
-      if (existingAttempt) {
-        rootNavigation.navigate('TestResult', { testId: test.id, resultId: existingAttempt.id });
-        return;
-      }
 
       if (eligibility.allowed && !isTestActive(test) && user?.role !== 'admin') {
         Alert.alert('Paper locked', getTestLockedMessage(test));
@@ -85,7 +79,7 @@ export function TestsScreen() {
 
       rootNavigation.navigate('TestIntro', { testId: test.id });
     },
-    [results, rootNavigation, user],
+    [rootNavigation, user],
   );
 
   const renderFilterChip = useCallback<ListRenderItem<{ key: Filter; label: string }>>(
@@ -173,6 +167,7 @@ export function TestsScreen() {
   return (
     <Screen useScrollView={false}>
       <FlatList
+        style={styles.flex}
         data={filteredTests}
         keyExtractor={(item) => item.id}
         renderItem={renderTestItem}
@@ -204,6 +199,9 @@ export function TestsScreen() {
 }
 
 const styles = StyleSheet.create({
+  flex: {
+    flex: 1,
+  },
   summaryCard: {
     marginHorizontal: spacing.xl,
     marginBottom: spacing.xl,

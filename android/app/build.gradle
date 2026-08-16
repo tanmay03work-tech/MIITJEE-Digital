@@ -27,8 +27,17 @@ android {
         applicationId = "com.miitjee.digital"
         minSdk = rootProject.ext.minSdkVersion
         targetSdk = rootProject.ext.targetSdkVersion
-        versionCode = 7
-        versionName = "1.1.0"
+        versionCode = 8
+        versionName = "1.2.0"
+        externalNativeBuild {
+            cmake {
+                arguments "-DCMAKE_BUILD_TYPE=Release",
+                          "-DCMAKE_CXX_FLAGS_RELEASE=-O0 -g0 -fno-vectorize -fno-slp-vectorize",
+                          "-DCMAKE_C_FLAGS_RELEASE=-O0 -g0 -fno-vectorize -fno-slp-vectorize"
+                cFlags "-O0 -fno-vectorize -fno-slp-vectorize -g0"
+                cppFlags "-O0 -fno-vectorize -fno-slp-vectorize -g0"
+            }
+        }
     }
 
     signingConfigs {

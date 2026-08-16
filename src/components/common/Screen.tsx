@@ -36,8 +36,8 @@ export function Screen({
       </View>
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Math.max(insets.top, 12)}>
+        behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'web' ? 0 : Math.max(insets.top, 12)}>
         {useScrollView ? (
           <ScrollView
             style={styles.flex}

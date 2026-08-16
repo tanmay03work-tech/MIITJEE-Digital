@@ -1,5 +1,5 @@
 import React, { memo, useEffect, useMemo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
 import { CheckCircle2 } from 'lucide-react-native';
 import Animated, { FadeIn, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 
@@ -12,9 +12,10 @@ interface OptionCardProps {
   label: string;
   selected: boolean;
   onPress: () => void;
+  imageUrl?: string | null;
 }
 
-function OptionCardComponent({ badgeLabel, label, selected, onPress }: OptionCardProps) {
+function OptionCardComponent({ badgeLabel, label, selected, onPress, imageUrl }: OptionCardProps) {
   const selectedScale = useSharedValue(selected ? 1.01 : 1);
   const displayLabel = useMemo(() => formatExamTextForDisplay(label), [label]);
 
@@ -34,7 +35,12 @@ function OptionCardComponent({ badgeLabel, label, selected, onPress }: OptionCar
       <View style={[styles.pill, selected && styles.pillSelected]}>
         <Text style={[styles.pillText, selected && styles.pillTextSelected]}>{badgeLabel}</Text>
       </View>
-      <Text style={[styles.text, selected && styles.textSelected]}>{displayLabel}</Text>
+      <View style={styles.contentWrap}>
+        <Text style={[styles.text, selected && styles.textSelected]}>{displayLabel}</Text>
+        {imageUrl ? (
+          <Image source={{ uri: imageUrl }} style={styles.optionImage} resizeMode="contain" />
+        ) : null}
+      </View>
       {selected ? (
         <Animated.View entering={FadeIn} style={styles.checkWrap}>
           <CheckCircle2 size={18} color={colors.primary} />
@@ -82,14 +88,24 @@ const styles = StyleSheet.create({
   pillTextSelected: {
     color: colors.white,
   },
-  text: {
+  contentWrap: {
     flex: 1,
+    flexShrink: 1,
+    gap: spacing.xs,
+  },
+  text: {
     flexShrink: 1,
     minWidth: 0,
     color: colors.text,
     fontSize: 15,
     lineHeight: 22,
     fontWeight: '700',
+  },
+  optionImage: {
+    width: '100%',
+    height: 120,
+    borderRadius: radius.md,
+    marginTop: spacing.xs,
   },
   textSelected: {
     color: colors.primaryDeep,

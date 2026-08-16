@@ -135,13 +135,13 @@ endif()
     if (!updated.includes('Work around NDK clang crashes on Windows when generating large debug info for worklets.')) {
       updated = updated.replace(
         'string(APPEND CMAKE_CXX_FLAGS " -fno-omit-frame-pointer -fstack-protector-all")\n',
-        `string(APPEND CMAKE_CXX_FLAGS " -fno-omit-frame-pointer -fstack-protector-all")\n\nif(CMAKE_HOST_WIN32 AND \${CMAKE_BUILD_TYPE} MATCHES "Debug")\n  # Work around NDK clang crashes on Windows when generating large debug info for worklets.\n  string(APPEND CMAKE_CXX_FLAGS " -g0")\nendif()\n`,
+        `string(APPEND CMAKE_CXX_FLAGS " -fno-omit-frame-pointer -fstack-protector-all")\n\nif(CMAKE_HOST_WIN32)\n  # Work around NDK clang crashes on Windows when generating large debug info for worklets.\n  string(APPEND CMAKE_CXX_FLAGS " -g0 -fno-vectorize -fno-slp-vectorize")\nendif()\n`,
       );
     }
 
     updated = updated.replace(
-      /(?:if\(CMAKE_HOST_WIN32 AND \$\{CMAKE_BUILD_TYPE\} MATCHES "Debug"\)\n  # Work around NDK clang crashes on Windows when generating large debug info for worklets\.\n  string\(APPEND CMAKE_CXX_FLAGS " -g0"\)\nendif\(\)\n){2,}/g,
-      `if(CMAKE_HOST_WIN32 AND \${CMAKE_BUILD_TYPE} MATCHES "Debug")\n  # Work around NDK clang crashes on Windows when generating large debug info for worklets.\n  string(APPEND CMAKE_CXX_FLAGS " -g0")\nendif()\n`,
+      /if\(CMAKE_HOST_WIN32 AND \$\{CMAKE_BUILD_TYPE\} MATCHES "Debug"\)/g,
+      'if(CMAKE_HOST_WIN32)',
     );
 
     return updated;

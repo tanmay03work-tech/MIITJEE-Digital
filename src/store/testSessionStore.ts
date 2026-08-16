@@ -10,8 +10,12 @@ interface TestSessionState {
   flaggedQuestionIds: string[];
   currentIndex: number;
   secondsRemaining: number;
-  startSession: (test: TestItem, questions: TestQuestion[]) => void;
+  studentName: string | null;
+  startSession: (test: TestItem, questions: TestQuestion[], studentName?: string) => void;
+  updateQuestions: (questions: TestQuestion[]) => void;
+  setStudentName: (name: string) => void;
   selectAnswer: (questionId: string, answer: string) => void;
+  clearResponse: (questionId: string) => void;
   toggleFlag: (questionId: string) => void;
   jumpTo: (index: number) => void;
   next: () => void;
@@ -27,11 +31,12 @@ const initialState = {
   flaggedQuestionIds: [],
   currentIndex: 0,
   secondsRemaining: 0,
+  studentName: null,
 };
 
 export const useTestSessionStore = create<TestSessionState>((set, get) => ({
   ...initialState,
-  startSession: (test, questions) =>
+  startSession: (test, questions, studentName) =>
     set({
       test,
       questions,
@@ -39,14 +44,32 @@ export const useTestSessionStore = create<TestSessionState>((set, get) => ({
       flaggedQuestionIds: [],
       currentIndex: 0,
       secondsRemaining: coerceDurationMinutes(test.durationMinutes) * 60,
+      studentName: studentName ?? get().studentName,
     }),
+  updateQuestions: (questions) => set({ questions }),
+  setStudentName: (name) => set({ studentName: name }),
   selectAnswer: (questionId, answer) =>
-    set((state) => ({
-      answers: {
-        ...state.answers,
-        [questionId]: answer,
-      },
-    })),
+    set((state) => {
+      const currentAnswer = state.answers[questionId];
+      if (currentAnswer === answer) {
+        const nextAnswers = { ...state.answers };
+        delete nextAnswers[questionId];
+        return { answers: nextAnswers };
+      }
+
+      return {
+        answers: {
+          ...state.answers,
+          [questionId]: answer,
+        },
+      };
+    }),
+  clearResponse: (questionId) =>
+    set((state) => {
+      const nextAnswers = { ...state.answers };
+      delete nextAnswers[questionId];
+      return { answers: nextAnswers };
+    }),
   toggleFlag: (questionId) =>
     set((state) => ({
       flaggedQuestionIds: state.flaggedQuestionIds.includes(questionId)
