@@ -639,13 +639,6 @@ export async function getPdfNativeTestById(testId: string): Promise<PdfNativeTes
  * List all created PDF-Native tests from Supabase and local store.
  */
 export async function listPdfNativeTests(): Promise<PdfNativeTest[]> {
-  const localTests = await getLocalPdfNativeTests();
-  const testMap = new Map<string, PdfNativeTest>();
-
-  for (const t of localTests) {
-    testMap.set(t.id, t);
-  }
-
   try {
     const rows = await selectRows<PdfNativeTestRow>('pdf_native_tests', '*', {
       order: 'created_at.desc',
@@ -691,12 +684,11 @@ export async function listPdfNativeTests(): Promise<PdfNativeTest[]> {
         batchesByTestId.set(ba.test_id, arr);
       }
 
-      for (const r of rows) {
-        const existing = testMap.get(r.id);
+      return rows.map((r) => {
         const remoteSetIds = setIdsByTestId.get(r.id) || [];
         const remoteBatches = batchesByTestId.get(r.id) || [];
 
-        testMap.set(r.id, {
+        return {
           id: r.id,
           title: r.title,
           description: r.description,
@@ -705,21 +697,26 @@ export async function listPdfNativeTests(): Promise<PdfNativeTest[]> {
           total_questions: r.total_questions,
           status: r.status,
           visibility: (r.visibility as any) || 'OPEN_FOR_ALL',
-          starts_at: r.starts_at || existing?.starts_at,
-          ends_at: r.ends_at !== undefined ? r.ends_at : existing?.ends_at,
-          allowed_batches: remoteBatches.length > 0 ? remoteBatches : (existing?.allowed_batches || []),
-          set_ids: remoteSetIds.length > 0 ? remoteSetIds : (existing?.set_ids || []),
-          sections: existing?.sections || [],
+          starts_at: r.starts_at,
+          ends_at: r.ends_at !== undefined ? r.ends_at : null,
+          allowed_batches: remoteBatches,
+          set_ids: remoteSetIds,
+          sections: [],
           created_at: r.created_at,
           updated_at: r.updated_at,
-        });
-      }
+        };
+      }).sort((a, b) => {
+        const dateA = new Date(a.created_at || 0).getTime();
+        const dateB = new Date(b.created_at || 0).getTime();
+        return dateB - dateA;
+      });
     }
   } catch (err) {
-    console.warn('[listPdfNativeTests] Supabase query skipped, using local store:', err);
+    console.warn('[listPdfNativeTests] Supabase query skipped, using local store fallback:', err);
   }
 
-  return Array.from(testMap.values()).sort((a, b) => {
+  const localTests = await getLocalPdfNativeTests();
+  return localTests.sort((a, b) => {
     const dateA = new Date(a.created_at || 0).getTime();
     const dateB = new Date(b.created_at || 0).getTime();
     return dateB - dateA;

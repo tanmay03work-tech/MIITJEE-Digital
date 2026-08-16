@@ -131,39 +131,44 @@ export async function createPdfNativeSet(
  * List all PDF-Native Sets.
  */
 export async function listPdfNativeSets(): Promise<PdfNativeSet[]> {
-  const localSets = await getLocalPdfNativeSets();
-  const setMap = new Map<string, PdfNativeSet>();
-
-  for (const s of localSets) {
-    setMap.set(s.id, s);
-  }
-
   try {
-    const rows = await selectRows<PdfNativeSetRow>('pdf_native_sets', '*', {
-      order: 'created_at.desc',
-    });
+    const rows = await selectRows<PdfNativeSetRow & { pdf_native_set_questions?: { count: number }[] }>(
+      'pdf_native_sets',
+      '*,pdf_native_set_questions(count)',
+      {
+        order: 'created_at.desc',
+      }
+    );
 
     if (rows && rows.length > 0) {
-      for (const r of rows) {
-        setMap.set(r.id, {
+      return rows.map((r) => {
+        const firstSq = Array.isArray(r.pdf_native_set_questions) ? r.pdf_native_set_questions[0] : undefined;
+        const actualCount = firstSq ? Number(firstSq.count) : (r.total_questions ?? 0);
+
+        return {
           id: r.id,
           set_name: r.set_name,
           source_pdf_id: r.source_pdf_id,
           pdf_url: r.pdf_url,
           subject: (r.subject || 'Physics') as any,
           description: r.description,
-          total_questions: r.total_questions,
+          total_questions: actualCount,
           status: r.status as PdfNativeSetStatus,
           created_at: r.created_at,
           updated_at: r.updated_at,
-        });
-      }
+        };
+      }).sort((a, b) => {
+        const dateA = new Date(a.created_at || 0).getTime();
+        const dateB = new Date(b.created_at || 0).getTime();
+        return dateB - dateA;
+      });
     }
   } catch (err) {
-    console.warn('[listPdfNativeSets] Supabase query skipped, using local store:', err);
+    console.warn('[listPdfNativeSets] Supabase query skipped, using local store fallback:', err);
   }
 
-  return Array.from(setMap.values()).sort((a, b) => {
+  const localSets = await getLocalPdfNativeSets();
+  return localSets.sort((a, b) => {
     const dateA = new Date(a.created_at || 0).getTime();
     const dateB = new Date(b.created_at || 0).getTime();
     return dateB - dateA;
@@ -174,16 +179,20 @@ export async function listPdfNativeSets(): Promise<PdfNativeSet[]> {
  * Get a single PDF-Native Set by ID.
  */
 export async function getPdfNativeSetById(setId: string): Promise<PdfNativeSet | null> {
-  const localSet = await getLocalPdfNativeSet(setId);
-  if (localSet) return localSet;
-
   try {
-    const rows = await selectRows<PdfNativeSetRow>('pdf_native_sets', '*', {
-      id: `eq.${setId}`,
-    });
+    const rows = await selectRows<PdfNativeSetRow & { pdf_native_set_questions?: { count: number }[] }>(
+      'pdf_native_sets',
+      '*,pdf_native_set_questions(count)',
+      {
+        id: `eq.${setId}`,
+      }
+    );
     if (rows && rows.length > 0) {
       const r = rows[0];
       if (r) {
+        const firstSq = Array.isArray(r.pdf_native_set_questions) ? r.pdf_native_set_questions[0] : undefined;
+        const actualCount = firstSq ? Number(firstSq.count) : (r.total_questions ?? 0);
+
         return {
           id: r.id,
           set_name: r.set_name,
@@ -191,7 +200,7 @@ export async function getPdfNativeSetById(setId: string): Promise<PdfNativeSet |
           pdf_url: r.pdf_url,
           subject: (r.subject || 'Physics') as any,
           description: r.description,
-          total_questions: r.total_questions,
+          total_questions: actualCount,
           status: r.status as PdfNativeSetStatus,
           created_at: r.created_at,
           updated_at: r.updated_at,
@@ -201,6 +210,9 @@ export async function getPdfNativeSetById(setId: string): Promise<PdfNativeSet |
   } catch (err) {
     console.warn('[getPdfNativeSetById] Supabase fetch skipped:', err);
   }
+
+  const localSet = await getLocalPdfNativeSet(setId);
+  if (localSet) return localSet;
 
   return null;
 }
