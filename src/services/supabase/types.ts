@@ -75,6 +75,9 @@ export interface TestRow {
   is_open_for_all?: boolean;
   is_link_revoked?: boolean;
   link_expires_at?: string | null;
+  correct_marks?: number | null;
+  wrong_marks?: number | null;
+  unattempted_marks?: number | null;
 }
 
 export interface TestQuestionRow {

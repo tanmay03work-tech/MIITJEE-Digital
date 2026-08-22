@@ -87,18 +87,20 @@ export function TestResultScreen({ route, navigation }: RootStackScreenProps<'Te
             }
           }
 
-          if (!breakdownMap[sub]) {
-            breakdownMap[sub] = { correct: 0, wrong: 0, unattempted: 0, score: 0, total: 0 };
+          let entry = breakdownMap[sub];
+          if (!entry) {
+            entry = { correct: 0, wrong: 0, unattempted: 0, score: 0, total: 0 };
+            breakdownMap[sub] = entry;
           }
-          breakdownMap[sub].total += 1;
+          entry.total += 1;
 
           const ans = (item.userAnswer || '').trim();
           if (ans === '' || item.isUnattempted) {
-            breakdownMap[sub].unattempted += 1;
+            entry.unattempted += 1;
           } else if (item.isCorrect) {
-            breakdownMap[sub].correct += 1;
+            entry.correct += 1;
           } else {
-            breakdownMap[sub].wrong += 1;
+            entry.wrong += 1;
           }
         });
 

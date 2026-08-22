@@ -244,7 +244,10 @@ async function submitStandardAttemptDirect(payload: SubmitAttemptPayload): Promi
 
   const testRow = testRows[0];
   const correctMarks = Number(testRow?.correct_marks) || 4;
-  const wrongMarks = Number(testRow?.wrong_marks) ? -Math.abs(Number(testRow.wrong_marks)) : -1;
+  const wrongMarks =
+    testRow?.wrong_marks !== undefined && testRow?.wrong_marks !== null
+      ? -Math.abs(Number(testRow.wrong_marks))
+      : -1;
 
   let correctAnswers = 0;
   let wrongAnswers = 0;
@@ -427,7 +430,7 @@ export async function submitAttempt(payload: SubmitAttemptPayload): Promise<Subm
       errorMsg.includes('overload') ||
       errorMsg.includes('candidate function')
     ) {
-      logWarn('Submitting attempt via evaluated fallback:', errorMsg);
+      logWarn('Submitting attempt via evaluated fallback:', { error: errorMsg });
       const fallbackResult = await submitStandardAttemptDirect(payload);
       logInfo('Fallback test submission succeeded.', {
         testId: payload.testId,
