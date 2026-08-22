@@ -11,13 +11,16 @@ export function getEligibility(user: AppUser | null, test: TestItem) {
   }
 
   const isOpenForAll =
-    Boolean(test.isOpenForAll) ||
-    !test.batchId ||
-    test.batchId.trim() === '' ||
-    test.batchId === 'ALL' ||
-    test.batchId.toLowerCase() === 'all batches' ||
-    test.batchId.toLowerCase() === 'all' ||
-    test.accessMode === 'OPEN_FOR_ALL';
+    test.isOpenForAll === true ||
+    test.accessMode === 'OPEN_FOR_ALL' ||
+    (test.isOpenForAll !== false &&
+      test.accessMode !== 'RESTRICTED_BATCH' &&
+      (!test.allowedBatches || test.allowedBatches.length === 0) &&
+      (!test.batchId ||
+        test.batchId.trim() === '' ||
+        test.batchId === 'ALL' ||
+        test.batchId.toLowerCase() === 'all batches' ||
+        test.batchId.toLowerCase() === 'all'));
 
   if (isOpenForAll) {
     return {

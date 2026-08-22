@@ -7,6 +7,7 @@ import { Badge } from '../../components/common/Badge';
 import { BrandLoadingState } from '../../components/common/BrandLoadingState';
 import { Card } from '../../components/common/Card';
 import { Screen } from '../../components/common/Screen';
+import { QuestionBodyRenderer } from '../../components/tests/QuestionBodyRenderer';
 import { useAppStore } from '../../store/appStore';
 import { colors, radius, spacing } from '../../theme';
 import { RootStackScreenProps } from '../../navigation/types';
@@ -74,9 +75,7 @@ export function ReviewAnswersScreen({ route }: RootStackScreenProps<'ReviewAnswe
                 <Badge label={badgeLabel} tone={badgeTone} />
               </View>
 
-              <Text style={styles.questionText}>{item.prompt}</Text>
-
-              {item.imageUrl ? <Image source={{ uri: item.imageUrl }} style={styles.questionImage} resizeMode="contain" /> : null}
+              <QuestionBodyRenderer prompt={item.prompt} imageUrl={item.imageUrl} />
 
               {item.questionType === 'mcq' ? (
                 <View style={styles.optionList}>

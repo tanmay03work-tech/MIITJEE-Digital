@@ -1,4 +1,5 @@
 import * as pdfjsLib from 'pdfjs-dist';
+import { normalizeAssetUrl } from '../supabase/mappers';
 
 // Global worker setup for browser environment
 if (typeof window !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
@@ -156,15 +157,62 @@ export interface PdfDocumentSource {
   pdfUrl?: string | null;
   buffer?: ArrayBuffer | null;
   pdfName?: string | null;
+  forceFresh?: boolean;
 }
 
 /**
- * Centralized, robust PDF Document loader.
- * Loads and caches PDFDocumentProxy instances. Handles URLs, ArrayBuffers, IndexedDB, and automatic bundled fallback.
- * Zero manual intervention required for students.
+ * Fetch PDF array buffer from a remote or normalized URL with retry backoff.
+ */
+async function fetchPdfBufferWithRetry(url: string, maxAttempts: number = 2): Promise<ArrayBuffer | null> {
+  let attempt = 0;
+  let lastError: unknown = null;
+
+  while (attempt < maxAttempts) {
+    attempt++;
+    let timeout: any = null;
+    try {
+      const controller = new AbortController();
+      timeout = setTimeout(() => controller.abort(), 2000);
+      if (timeout && typeof timeout.unref === 'function') {
+        timeout.unref();
+      }
+
+      const res = await fetch(url, { signal: controller.signal });
+      if (timeout) clearTimeout(timeout);
+
+      if (res.ok) {
+        const buf = await res.arrayBuffer();
+        if (buf && buf.byteLength > 0) {
+          return buf;
+        }
+      }
+    } catch (err) {
+      if (timeout) clearTimeout(timeout);
+      lastError = err;
+      if (attempt < maxAttempts) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
+  }
+
+  console.warn(`[pdfDocumentCache] Fetch failed after ${maxAttempts} attempts for ${url}:`, lastError);
+  return null;
+}
+
+/**
+ * Centralized, authoritative PDF Document loader.
+ * Loads and caches PDFDocumentProxy instances in browser session memory.
+ * ABSOLUTE RULE: Zero silent fallback to dummy/bundled PDFs.
+ * If source cannot be resolved, fails closed with a clear error so UI can display RETRY.
  */
 export function getPdfDocument(source: PdfDocumentSource): Promise<pdfjsLib.PDFDocumentProxy> {
   const cacheKey = source.pdfId || source.pdfUrl || 'default_pdf';
+
+  if (source.forceFresh) {
+    docCache.delete(cacheKey);
+    if (source.pdfId) docCache.delete(source.pdfId);
+    if (source.pdfUrl) docCache.delete(source.pdfUrl);
+  }
 
   if (docCache.has(cacheKey)) {
     return docCache.get(cacheKey)!;
@@ -179,7 +227,7 @@ export function getPdfDocument(source: PdfDocumentSource): Promise<pdfjsLib.PDFD
       return await pdfjsLib.getDocument({ data: new Uint8Array(safeBuffer) }).promise;
     }
 
-    // 2. Check IndexedDB / memory binary store by pdfId
+    // 2. Check memory / IndexedDB binary store by pdfId
     if (source.pdfId) {
       const cachedBuf = await getPdfBinary(source.pdfId);
       if (cachedBuf && cachedBuf.byteLength > 0) {
@@ -187,7 +235,7 @@ export function getPdfDocument(source: PdfDocumentSource): Promise<pdfjsLib.PDFD
       }
     }
 
-    // 3. Check IndexedDB / memory binary store by pdfUrl
+    // 3. Check memory / IndexedDB binary store by pdfUrl
     if (source.pdfUrl) {
       const cachedBuf = await getPdfBinary(source.pdfUrl);
       if (cachedBuf && cachedBuf.byteLength > 0) {
@@ -195,54 +243,47 @@ export function getPdfDocument(source: PdfDocumentSource): Promise<pdfjsLib.PDFD
       }
     }
 
-    // 4. Try fetching from network / URL if not a dead blob
-    if (
-      source.pdfUrl &&
-      typeof source.pdfUrl === 'string' &&
-      source.pdfUrl.trim().length > 0 &&
-      !source.pdfUrl.startsWith('blob:')
-    ) {
-      try {
-        const cleanUrl = source.pdfUrl.trim();
-        const res = await fetch(cleanUrl);
-        if (res.ok) {
-          const buf = await res.arrayBuffer();
-          if (buf && buf.byteLength > 0) {
-            if (source.pdfId) void savePdfBinary(source.pdfId, buf.slice(0));
-            void savePdfBinary(cleanUrl, buf.slice(0));
-            return await pdfjsLib.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise;
-          }
+    // 4. Try fetching from network / URL with normalization and retries
+    const candidateUrls: string[] = [];
+    if (source.pdfUrl && typeof source.pdfUrl === 'string' && source.pdfUrl.trim().length > 0) {
+      const trimmed = source.pdfUrl.trim();
+      candidateUrls.push(trimmed);
+      if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://') && !trimmed.startsWith('blob:')) {
+        const normalized = normalizeAssetUrl(trimmed);
+        if (normalized && normalized !== trimmed) {
+          candidateUrls.push(normalized);
         }
-      } catch (fetchErr) {
-        console.warn(`[pdfDocumentCache] Remote fetch skipped: ${source.pdfUrl}`, fetchErr);
       }
     }
 
-    // 5. Automatic seamless bundled reference PDF fallback (Guarantees students ALWAYS see visual questions)
-    const bundledFallbackUrls = [
-      '/REF/Synchroniser__1157799_1_1786168383.pdf',
-      'REF/Synchroniser__1157799_1_1786168383.pdf'
-    ];
-
-    for (const refUrl of bundledFallbackUrls) {
-      try {
-        const refRes = await fetch(refUrl);
-        if (refRes.ok) {
-          const refBuf = await refRes.arrayBuffer();
-          if (refBuf && refBuf.byteLength > 0) {
-            void savePdfBinary(refUrl, refBuf.slice(0));
-            if (source.pdfId) void savePdfBinary(source.pdfId, refBuf.slice(0));
-            if (source.pdfUrl) void savePdfBinary(source.pdfUrl, refBuf.slice(0));
-            return await pdfjsLib.getDocument({ data: new Uint8Array(refBuf.slice(0)) }).promise;
+    for (const url of candidateUrls) {
+      if (url.startsWith('blob:') && typeof window !== 'undefined') {
+        // Blob URLs are only valid within the creating browser context
+        try {
+          const res = await fetch(url);
+          if (res.ok) {
+            const buf = await res.arrayBuffer();
+            if (buf && buf.byteLength > 0) {
+              if (source.pdfId) void savePdfBinary(source.pdfId, buf.slice(0));
+              return await pdfjsLib.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise;
+            }
           }
+        } catch {
+          // Continue to next candidate
         }
-      } catch {
-        // Continue to next fallback
+      } else if (!url.startsWith('blob:')) {
+        const buf = await fetchPdfBufferWithRetry(url, 2);
+        if (buf && buf.byteLength > 0) {
+          if (source.pdfId) void savePdfBinary(source.pdfId, buf.slice(0));
+          void savePdfBinary(url, buf.slice(0));
+          return await pdfjsLib.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise;
+        }
       }
     }
 
+    // Fail closed with authoritative error (never silently fallback)
     throw new Error(
-      `PDF_SOURCE_MISSING: Unable to load PDF document automatically.`
+      `PDF_SOURCE_MISSING: Unable to load the original question paper PDF document.`
     );
   })();
 
@@ -254,6 +295,14 @@ export function getPdfDocument(source: PdfDocumentSource): Promise<pdfjsLib.PDFD
   });
 
   return loaderPromise;
+}
+
+/**
+ * Evict a specific PDF document from memory cache to allow clean retry.
+ */
+export function evictPdfDocument(key: string): void {
+  if (!key) return;
+  docCache.delete(key);
 }
 
 /**

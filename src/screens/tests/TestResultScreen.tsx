@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown, ZoomIn } from 'react-native-reanimated';
-import { Trophy } from 'lucide-react-native';
+import { Award, BookOpen, CheckCircle2, Clock, HelpCircle, Layers, Trophy, User, XCircle } from 'lucide-react-native';
 
 import { AppHeader } from '../../components/common/AppHeader';
 import { Badge } from '../../components/common/Badge';
@@ -13,13 +13,24 @@ import { RootStackScreenProps } from '../../navigation/types';
 import { fetchExistingAttemptForTest, fetchResultById } from '../../services/api/tests';
 import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
-import { colors, spacing } from '../../theme';
+import { colors, radius, spacing } from '../../theme';
 import { LeaderboardEntry, TestResult } from '../../types';
+import { formatDateTimeLabel } from '../../utils/formatters';
 
 const EMPTY_LEADERBOARD: LeaderboardEntry[] = [];
 
+interface SubjectScoreItem {
+  subject: string;
+  correct: number;
+  wrong: number;
+  unattempted: number;
+  score: number;
+  total: number;
+}
+
 export function TestResultScreen({ route, navigation }: RootStackScreenProps<'TestResult'>) {
   const { resultId, testId } = route.params;
+  const user = useAuthStore((state) => state.user);
   const storeResult = useAppStore((state) =>
     state.results.find((entry) => entry.id === resultId || entry.id === route.params?.resultId)
     || state.results.find((entry) => entry.testId === testId)
@@ -29,13 +40,14 @@ export function TestResultScreen({ route, navigation }: RootStackScreenProps<'Te
   const [isResultLoading, setIsResultLoading] = useState<boolean>(!result);
   const storedLeaderboard = useAppStore((state) => state.testLeaderboards[testId]);
   const loadLeaderboard = useAppStore((state) => state.loadLeaderboard);
+  const loadQuestions = useAppStore((state) => state.loadQuestions);
   const test = useAppStore((state) => state.tests.find((candidate) => candidate.id === testId));
   const [leaderboardError, setLeaderboardError] = useState<string>();
   const [isLeaderboardLoading, setIsLeaderboardLoading] = useState(false);
   const leaderboard = storedLeaderboard ?? EMPTY_LEADERBOARD;
 
   const loadReview = useAppStore((state) => state.loadReview);
-  const [subjectBreakdown, setSubjectBreakdown] = useState<Array<{ subject: string; correct: number; wrong: number; unattempted: number; score: number; total: number }>>([]);
+  const [subjectBreakdown, setSubjectBreakdown] = useState<SubjectScoreItem[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -43,20 +55,45 @@ export function TestResultScreen({ route, navigation }: RootStackScreenProps<'Te
     async function loadSubjectBreakdown() {
       if (!resultId) return;
       try {
-        const reviews = await loadReview(resultId);
+        const [reviews, questions] = await Promise.all([
+          loadReview(resultId),
+          loadQuestions(testId).catch(() => []),
+        ]);
+
         if (!active || !reviews.length) return;
 
-        const breakdownMap: Record<string, { correct: number; wrong: number; unattempted: number; score: number; total: number }> = {};
+        const questionSubjectMap: Record<string, string> = {};
+        if (questions && questions.length > 0) {
+          questions.forEach((q) => {
+            if (q.id && q.subjectLabel?.trim()) {
+              questionSubjectMap[q.id] = q.subjectLabel.trim();
+            }
+          });
+        }
 
-        reviews.forEach((item) => {
-          const sub = (test?.subject || 'General Section').trim();
+        const breakdownMap: Record<string, { correct: number; wrong: number; unattempted: number; score: number; total: number }> = {};
+        const defaultSubject = (test?.subject || 'Physics').trim();
+
+        reviews.forEach((item, index) => {
+          let sub = questionSubjectMap[item.questionId];
+          if (!sub) {
+            if (defaultSubject.toLowerCase().includes('physics') && defaultSubject.toLowerCase().includes('chem')) {
+              const third = Math.ceil(reviews.length / 3);
+              if (index < third) sub = 'Physics';
+              else if (index < third * 2) sub = 'Chemistry';
+              else sub = 'Mathematics';
+            } else {
+              sub = defaultSubject;
+            }
+          }
+
           if (!breakdownMap[sub]) {
             breakdownMap[sub] = { correct: 0, wrong: 0, unattempted: 0, score: 0, total: 0 };
           }
           breakdownMap[sub].total += 1;
 
           const ans = (item.userAnswer || '').trim();
-          if (ans === '') {
+          if (ans === '' || item.isUnattempted) {
             breakdownMap[sub].unattempted += 1;
           } else if (item.isCorrect) {
             breakdownMap[sub].correct += 1;
@@ -65,26 +102,31 @@ export function TestResultScreen({ route, navigation }: RootStackScreenProps<'Te
           }
         });
 
+        const correctMarkVal = Number(test?.correctMarks) || 4;
+        const wrongMarkVal = Number(test?.wrongMarks) ? Math.abs(Number(test?.wrongMarks)) : 1;
+
         Object.keys(breakdownMap).forEach((key) => {
           const b = breakdownMap[key];
           if (b) {
-            b.score = b.correct * (test?.correctMarks ?? 4) - b.wrong * Math.abs(test?.wrongMarks ?? 1);
+            b.score = b.correct * correctMarkVal - b.wrong * wrongMarkVal;
           }
         });
 
-        const list = Object.keys(breakdownMap).map((key) => {
-          const entry = breakdownMap[key];
+        const list: SubjectScoreItem[] = Object.keys(breakdownMap).map((key) => {
+          const entry = breakdownMap[key]!;
           return {
             subject: key,
-            correct: entry?.correct ?? 0,
-            wrong: entry?.wrong ?? 0,
-            unattempted: entry?.unattempted ?? 0,
-            score: entry?.score ?? 0,
-            total: entry?.total ?? 0,
+            correct: entry.correct,
+            wrong: entry.wrong,
+            unattempted: entry.unattempted,
+            score: entry.score,
+            total: entry.total,
           };
         });
 
-        setSubjectBreakdown(list);
+        if (active) {
+          setSubjectBreakdown(list);
+        }
       } catch {
         // Fallback to empty breakdown list
       }
@@ -94,7 +136,7 @@ export function TestResultScreen({ route, navigation }: RootStackScreenProps<'Te
     return () => {
       active = false;
     };
-  }, [loadReview, resultId, test?.correctMarks, test?.subject, test?.wrongMarks]);
+  }, [loadQuestions, loadReview, resultId, test?.correctMarks, test?.subject, test?.wrongMarks, testId]);
 
   useEffect(() => {
     let active = true;
@@ -193,41 +235,65 @@ export function TestResultScreen({ route, navigation }: RootStackScreenProps<'Te
   const wrongCount = result.wrongAnswers ?? Math.max(0, result.totalQuestions - result.correctAnswers - (result.unattempted ?? 0));
   const unattemptedCount = result.unattempted ?? Math.max(0, result.totalQuestions - result.correctAnswers - wrongCount);
 
+  const studentDisplayName = result.studentName || user?.fullName || 'Student';
+  const isOpenExam = Boolean(test?.isOpenForAll) || test?.accessMode === 'OPEN_FOR_ALL';
+  const batchDisplayName = isOpenExam ? 'Open for All' : (test?.batchId || user?.batchId || 'Open for All');
+  const timingFormatted = result.submittedAt ? formatDateTimeLabel(result.submittedAt) : 'Submitted';
+
   return (
     <Screen contentContainerStyle={styles.content}>
-      <AppHeader title="Result" subtitle={test?.title ?? 'Latest submission'} />
+      <AppHeader title="Test Result" subtitle={test?.title ?? 'Official scorecard'} />
 
+      {/* 1. Candidate Info Card */}
+      <Animated.View entering={FadeInDown.delay(20)}>
+        <Card style={styles.candidateCard}>
+          <View style={styles.candidateHeaderRow}>
+            <View style={styles.candidateAvatar}>
+              <User size={20} color={colors.primary} />
+            </View>
+            <View style={styles.candidateInfo}>
+              <Text style={styles.candidateName}>{studentDisplayName}</Text>
+              <Text style={styles.candidateTestTitle}>{test?.title ?? 'Test Paper'}</Text>
+            </View>
+            <Badge label={batchDisplayName} tone={isOpenExam ? 'success' : 'primary'} />
+          </View>
+
+          <View style={styles.candidateMetaGrid}>
+            <View style={styles.candidateMetaItem}>
+              <Clock size={14} color={colors.textMuted} />
+              <Text style={styles.candidateMetaText}>{timingFormatted}</Text>
+            </View>
+            <View style={styles.candidateMetaItem}>
+              <Layers size={14} color={colors.textMuted} />
+              <Text style={styles.candidateMetaText}>
+                {test?.durationMinutes ? `${test.durationMinutes} mins duration` : 'Completed Paper'}
+              </Text>
+            </View>
+          </View>
+        </Card>
+      </Animated.View>
+
+      {/* 2. Overall Score Ring */}
       <Animated.View entering={ZoomIn.duration(450)} style={styles.scoreWrap}>
         <View style={styles.scoreRingOuter}>
           <View style={styles.scoreRingInner}>
             <Text style={styles.scoreValue}>{result.score}</Text>
-            <Text style={styles.scoreLabel}>Score (Marks)</Text>
+            <Text style={styles.scoreLabel}>Total Score</Text>
           </View>
         </View>
       </Animated.View>
 
-      <Animated.View entering={FadeInDown.delay(40)}>
-        <Card style={styles.summaryCard}>
-          <Text style={styles.summaryEyebrow}>Result Summary</Text>
-          <Text style={styles.summaryTitle}>
-            {result.studentName ? `${result.studentName}, you have completed this paper successfully.` : 'You have completed this paper successfully.'}
-          </Text>
-          <Text style={styles.summaryText}>
-            Your score, rank, and review sheet are ready. Use this summary to identify the next area to improve.
-          </Text>
-        </Card>
-      </Animated.View>
-
-      <Animated.View entering={FadeInDown.delay(80)} style={styles.metricsRow}>
+      {/* 3. Overall Performance Metrics */}
+      <Animated.View entering={FadeInDown.delay(60)} style={styles.metricsRow}>
         <Card style={styles.metricCard}>
           <Text style={styles.metricLabel}>Correct</Text>
-          <Text style={styles.metricValue}>
+          <Text style={[styles.metricValue, { color: colors.success }]}>
             {result.correctAnswers}/{result.totalQuestions}
           </Text>
         </Card>
         <Card style={styles.metricCard}>
           <Text style={styles.metricLabel}>Wrong</Text>
-          <Text style={styles.metricValue}>{wrongCount}</Text>
+          <Text style={[styles.metricValue, { color: colors.danger }]}>{wrongCount}</Text>
         </Card>
         <Card style={styles.metricCard}>
           <Text style={styles.metricLabel}>Unattempted</Text>
@@ -243,17 +309,107 @@ export function TestResultScreen({ route, navigation }: RootStackScreenProps<'Te
         </Card>
       </Animated.View>
 
+      {/* 4. Subject-Wise Breakdown Section (Physics, Chemistry, Math) */}
+      <Animated.View entering={FadeInDown.delay(80)}>
+        <Card style={styles.subjectSectionCard}>
+          <View style={styles.subjectHeaderRow}>
+            <View style={styles.subjectHeaderLeft}>
+              <BookOpen size={18} color={colors.primary} />
+              <Text style={styles.subjectSectionTitle}>Subject-Wise Score Breakdown</Text>
+            </View>
+            <Badge label="Detailed" tone="primary" />
+          </View>
+
+          {subjectBreakdown.length > 0 ? (
+            <View style={styles.subjectList}>
+              {subjectBreakdown.map((sb, idx) => (
+                <View key={`${sb.subject}_${idx}`} style={styles.subjectCard}>
+                  <View style={styles.subjectTitleRow}>
+                    <Text style={styles.subjectName}>{sb.subject}</Text>
+                    <View style={styles.subjectScorePill}>
+                      <Text style={styles.subjectScoreText}>
+                        Score: <Text style={styles.subjectScoreBold}>{sb.score}</Text> marks
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.subjectStatsRow}>
+                    <View style={styles.subjectStat}>
+                      <CheckCircle2 size={13} color={colors.success} />
+                      <Text style={styles.subjectStatLabel}>Correct: </Text>
+                      <Text style={[styles.subjectStatVal, { color: colors.success }]}>{sb.correct}</Text>
+                    </View>
+                    <View style={styles.subjectStat}>
+                      <XCircle size={13} color={colors.danger} />
+                      <Text style={styles.subjectStatLabel}>Wrong: </Text>
+                      <Text style={[styles.subjectStatVal, { color: colors.danger }]}>{sb.wrong}</Text>
+                    </View>
+                    <View style={styles.subjectStat}>
+                      <HelpCircle size={13} color={colors.textMuted} />
+                      <Text style={styles.subjectStatLabel}>Unattempted: </Text>
+                      <Text style={styles.subjectStatVal}>{sb.unattempted}</Text>
+                    </View>
+                    <View style={styles.subjectStat}>
+                      <Award size={13} color={colors.primary} />
+                      <Text style={styles.subjectStatLabel}>Total: </Text>
+                      <Text style={styles.subjectStatVal}>{sb.total}</Text>
+                    </View>
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : (
+            /* Fallback single breakdown view */
+            <View style={styles.subjectList}>
+              <View style={styles.subjectCard}>
+                <View style={styles.subjectTitleRow}>
+                  <Text style={styles.subjectName}>{test?.subject || 'All Subjects'}</Text>
+                  <View style={styles.subjectScorePill}>
+                    <Text style={styles.subjectScoreText}>
+                      Score: <Text style={styles.subjectScoreBold}>{result.score}</Text> marks
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.subjectStatsRow}>
+                  <View style={styles.subjectStat}>
+                    <CheckCircle2 size={13} color={colors.success} />
+                    <Text style={styles.subjectStatLabel}>Correct: </Text>
+                    <Text style={[styles.subjectStatVal, { color: colors.success }]}>{result.correctAnswers}</Text>
+                  </View>
+                  <View style={styles.subjectStat}>
+                    <XCircle size={13} color={colors.danger} />
+                    <Text style={styles.subjectStatLabel}>Wrong: </Text>
+                    <Text style={[styles.subjectStatVal, { color: colors.danger }]}>{wrongCount}</Text>
+                  </View>
+                  <View style={styles.subjectStat}>
+                    <HelpCircle size={13} color={colors.textMuted} />
+                    <Text style={styles.subjectStatLabel}>Unattempted: </Text>
+                    <Text style={styles.subjectStatVal}>{unattemptedCount}</Text>
+                  </View>
+                  <View style={styles.subjectStat}>
+                    <Award size={13} color={colors.primary} />
+                    <Text style={styles.subjectStatLabel}>Total: </Text>
+                    <Text style={styles.subjectStatVal}>{result.totalQuestions}</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+          )}
+        </Card>
+      </Animated.View>
+
+      {/* 5. Batch Leaderboard */}
       <Card style={styles.leaderboardCard}>
         <View style={styles.leaderboardHeader}>
-          <Text style={styles.leaderboardTitle}>This Batch Paper Leaderboard</Text>
+          <Text style={styles.leaderboardTitle}>Paper Leaderboard</Text>
           <Badge label="Live" tone="success" />
         </View>
         {leaderboardError ? (
           <Text style={styles.leaderboardMeta}>{leaderboardError}</Text>
         ) : isLeaderboardLoading && leaderboard.length === 0 ? (
-          <Text style={styles.leaderboardMeta}>Loading the latest batch ranking...</Text>
+          <Text style={styles.leaderboardMeta}>Loading the latest ranking...</Text>
         ) : leaderboard.length === 0 ? (
-          <Text style={styles.leaderboardMeta}>This leaderboard will appear after students from your batch attempt this paper.</Text>
+          <Text style={styles.leaderboardMeta}>Leaderboard will appear as students complete this paper.</Text>
         ) : (
           leaderboard.slice(0, 5).map((entry) => (
             <View key={entry.userId} style={styles.leaderboardRow}>
@@ -262,7 +418,7 @@ export function TestResultScreen({ route, navigation }: RootStackScreenProps<'Te
               </View>
               <View style={styles.leaderboardText}>
                 <Text style={styles.leaderboardName}>{entry.fullName}</Text>
-                <Text style={styles.leaderboardMeta}>{entry.batchId ?? 'Your batch cohort'}</Text>
+                <Text style={styles.leaderboardMeta}>{entry.batchId ?? (isOpenExam ? 'Open for All' : 'Batch Cohort')}</Text>
               </View>
               <View style={styles.leaderboardScore}>
                 <Text style={styles.rankNumber}>#{entry.rank}</Text>
@@ -286,6 +442,57 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: spacing.xl,
     gap: spacing.xl,
+    paddingBottom: spacing.xxxl,
+  },
+  candidateCard: {
+    gap: spacing.md,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+  },
+  candidateHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  candidateAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.pill,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  candidateInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  candidateName: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  candidateTestTitle: {
+    fontSize: 12,
+    color: colors.textMuted,
+  },
+  candidateMetaGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.lg,
+    paddingTop: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  candidateMetaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  candidateMetaText: {
+    fontSize: 12,
+    color: colors.textMuted,
+    fontWeight: '600',
   },
   scoreWrap: {
     alignItems: 'center',
@@ -318,26 +525,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
-  summaryCard: {
-    gap: spacing.sm,
-  },
-  summaryEyebrow: {
-    color: colors.primary,
-    fontSize: 12,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.7,
-  },
-  summaryTitle: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  summaryText: {
-    color: colors.textMuted,
-    fontSize: 14,
-    lineHeight: 20,
-  },
   metricsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -363,6 +550,83 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '800',
     textAlign: 'center',
+  },
+  subjectSectionCard: {
+    gap: spacing.md,
+    backgroundColor: colors.surface,
+  },
+  subjectHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingBottom: spacing.xs,
+  },
+  subjectHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  subjectSectionTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  subjectList: {
+    gap: spacing.md,
+  },
+  subjectCard: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  subjectTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  subjectName: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  subjectScorePill: {
+    backgroundColor: colors.primarySoft,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 3,
+    borderRadius: radius.pill,
+  },
+  subjectScoreText: {
+    fontSize: 12,
+    color: colors.primary,
+    fontWeight: '700',
+  },
+  subjectScoreBold: {
+    fontWeight: '900',
+    color: colors.primary,
+  },
+  subjectStatsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.md,
+    alignItems: 'center',
+  },
+  subjectStat: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  subjectStatLabel: {
+    fontSize: 12,
+    color: colors.textMuted,
+    fontWeight: '600',
+  },
+  subjectStatVal: {
+    fontSize: 12,
+    color: colors.text,
+    fontWeight: '800',
   },
   leaderboardCard: {
     gap: spacing.md,

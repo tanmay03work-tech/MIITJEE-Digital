@@ -233,7 +233,7 @@ export async function getPdfNativeSetQuestions(setId: string): Promise<PdfNative
     if (relations && relations.length > 0) {
       let setRow: any = null;
       try {
-        const sets = await selectRows<{ id: string; pdf_id?: string; pdf_url?: string }>('pdf_native_sets', '*', {
+        const sets = await selectRows<{ id: string; source_pdf_id?: string; pdf_id?: string; pdf_url?: string }>('pdf_native_sets', '*', {
           id: `eq.${setId}`,
           limit: 1,
         });
@@ -256,6 +256,9 @@ export async function getPdfNativeSetQuestions(setId: string): Promise<PdfNative
       const localQList = await getLocalPdfNativeQuestions();
       localQList.forEach((q) => qMap.set(q.id, q));
 
+      const setPdfId = setRow?.source_pdf_id || setRow?.pdf_id || '';
+      const setPdfUrl = setRow?.pdf_url || '';
+
       qRows.forEach((q) => {
         const rawBbox = q.bbox as any;
         const regions = Array.isArray(rawBbox?.regions)
@@ -273,8 +276,8 @@ export async function getPdfNativeSetQuestions(setId: string): Promise<PdfNative
 
         qMap.set(q.id, {
           id: q.id,
-          pdf_id: q.pdf_id || setRow?.pdf_id || 'ref',
-          pdf_url: q.pdf_url || setRow?.pdf_url,
+          pdf_id: q.pdf_id || setPdfId,
+          pdf_url: q.pdf_url || setPdfUrl,
           question_number: q.question_number,
           page_start: Number(q.page_start) || 1,
           page_end: Number(q.page_end) || Number(q.page_start) || 1,

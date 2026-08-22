@@ -50,7 +50,15 @@ function TestCardComponent({ test, eligibility, onStart }: TestCardProps) {
         <View style={styles.metaTile}>
           <GraduationCap size={16} color={colors.accent} />
           <Text style={styles.metaLabel}>Batch</Text>
-          <Text style={styles.metaValue}>{test.batchId ?? 'All batches'}</Text>
+          <Text style={styles.metaValue}>
+            {test.allowedBatches && test.allowedBatches.length > 0
+              ? test.allowedBatches.join(', ')
+              : test.batchId && test.batchId !== 'ALL'
+              ? test.batchId
+              : test.isOpenForAll
+              ? 'All batches'
+              : 'Restricted'}
+          </Text>
         </View>
         <View style={styles.metaTile}>
           <Sparkles size={16} color={colors.warning} />

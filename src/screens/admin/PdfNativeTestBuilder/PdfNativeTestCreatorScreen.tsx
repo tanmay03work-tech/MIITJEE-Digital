@@ -284,14 +284,8 @@ export function PdfNativeTestCreatorScreen({
             setSelectedSetIds([matchingSet.id]);
             await syncQuestionsAndSectionsForSets([matchingSet.id], setsList);
           }
-        } else if (setsList.length > 0) {
-          // Default to first set so questions are ready
-          const firstSet = setsList[0];
-          if (firstSet) {
-            setSelectedSetIds([firstSet.id]);
-            await syncQuestionsAndSectionsForSets([firstSet.id], setsList);
-          }
         } else {
+          setSelectedSetIds([]);
           setAllQuestions([]);
           setSelectedIds(new Set());
         }
@@ -547,10 +541,15 @@ export function PdfNativeTestCreatorScreen({
       return;
     }
 
+    const qIds = orderedSelectedQuestions.map((q) => q.id);
+    if (qIds.length === 0) {
+      Alert.alert('Cannot Publish Test', 'No questions are selected for this test. Please ensure at least one question is selected.');
+      return;
+    }
+
     setIsPublishing(true);
     try {
       const durationNum = parseInt(duration, 10) || 60;
-      const qIds = orderedSelectedQuestions.map((q) => q.id);
       const setIdsArr = selectedSetIds;
 
       let savedTestId = testId;

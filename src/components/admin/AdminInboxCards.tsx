@@ -90,19 +90,27 @@ export const GeneralEnquiryEmptyState = memo(function GeneralEnquiryEmptyState()
 });
 
 export const AdminResultCard = memo(function AdminResultCard({ result, user, test, onDelete }: ResultCardProps) {
+  const isOpenExam = Boolean(test?.isOpenForAll) || test?.accessMode === 'OPEN_FOR_ALL';
+  const batchLabel = isOpenExam ? 'Open for All' : (user?.batchId || test?.batchId || 'Open for All');
+  const wrongCount = result.wrongAnswers ?? Math.max(0, result.totalQuestions - result.correctAnswers - (result.unattempted ?? 0));
+  const unattemptedCount = result.unattempted ?? Math.max(0, result.totalQuestions - result.correctAnswers - wrongCount);
+
   return (
     <Card style={styles.resultCard}>
       <View style={styles.headerRow}>
         <Badge label={test?.type ?? 'paper'} tone={test?.type === 'scholarship' ? 'warning' : 'primary'} />
-        <Badge label={`Rank #${result.rank}`} tone="success" />
+        <Badge label={batchLabel} tone={isOpenExam ? 'success' : 'primary'} />
+        <Badge label={`Rank #${result.rank}`} tone="neutral" />
       </View>
       <Text style={styles.title}>{test?.title ?? 'Untitled paper'}</Text>
-      <Text style={styles.emphasis}>{result.studentName || user?.fullName || 'Unknown learner'}</Text>
-      <Text style={styles.meta}>{`${result.correctAnswers}/${result.totalQuestions} correct | ${formatDateLabel(result.submittedAt)}`}</Text>
+      <Text style={styles.emphasis}>{result.studentName || user?.fullName || 'Student'}</Text>
+      <Text style={styles.meta}>
+        {`${result.correctAnswers} Correct • ${wrongCount} Wrong • ${unattemptedCount} Unattempted | ${formatDateLabel(result.submittedAt)}`}
+      </Text>
       <View style={styles.footerRow}>
         <View style={styles.scoreWrap}>
-          <Text style={styles.score}>{result.score}%</Text>
-          <Text style={styles.percentile}>Percentile {result.percentile}</Text>
+          <Text style={styles.score}>{result.score} Marks</Text>
+          <Text style={styles.percentile}>Percentile P{result.percentile}</Text>
         </View>
         <DeleteButton
           label="Delete"

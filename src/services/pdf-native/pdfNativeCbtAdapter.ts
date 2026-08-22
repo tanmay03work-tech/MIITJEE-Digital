@@ -21,7 +21,9 @@ declare const process: { env: Record<string, string> };
  */
 
 export function mapPdfNativeTestToCbtTestItem(test: PdfNativeTest): TestItem {
-  const isOpenForAll = test.visibility ? test.visibility === 'OPEN_FOR_ALL' : true;
+  const isOpenForAll = test.visibility === 'OPEN_FOR_ALL';
+  const allowedBatches = test.allowed_batches || [];
+  const primaryBatchId = allowedBatches.length > 0 ? allowedBatches[0] : undefined;
   const startsAt = test.starts_at || test.created_at || new Date().toISOString();
   const endsAt = test.ends_at ?? null;
   const now = Date.now();
@@ -40,8 +42,8 @@ export function mapPdfNativeTestToCbtTestItem(test: PdfNativeTest): TestItem {
     isStarted: isStarted,
     startedAt: startsAt,
     isOpenForAll: isOpenForAll,
-    batchId: !isOpenForAll && test.allowed_batches && test.allowed_batches.length > 0 ? test.allowed_batches[0] : undefined,
-    allowedBatches: test.allowed_batches,
+    batchId: primaryBatchId,
+    allowedBatches: allowedBatches,
     accessMode: isOpenForAll ? 'OPEN_FOR_ALL' : 'RESTRICTED_BATCH',
     isPdfNative: true,
     correctMarks: 4,
@@ -214,13 +216,20 @@ export async function fetchPdfNativeCbtQuestions(testId: string): Promise<TestQu
         questionRows = [];
       }
 
-      let setRow: any = null;
+      let linkedSetRow: { source_pdf_id?: string; pdf_id?: string; pdf_url?: string } | null = null;
       try {
-        const sets = await selectRows<{ id: string; pdf_id?: string; pdf_url?: string }>('pdf_native_sets', '*', {
-          id: `eq.${testId}`,
-          limit: 1,
+        const testSets = await selectRows<{ set_id: string }>('pdf_native_test_sets', 'set_id', {
+          test_id: `eq.${testId}`,
+          order: 'order_index.asc',
         });
-        if (sets && sets.length > 0) setRow = sets[0];
+        if (testSets && testSets.length > 0) {
+          const sIds = testSets.map((ts) => ts.set_id);
+          const sets = await selectRows<{ id: string; source_pdf_id?: string; pdf_id?: string; pdf_url?: string }>('pdf_native_sets', '*', {
+            id: `in.(${sIds.join(',')})`,
+            limit: 1,
+          });
+          if (sets && sets.length > 0) linkedSetRow = sets[0] ?? null;
+        }
       } catch {
         // Continue
       }
@@ -228,6 +237,9 @@ export async function fetchPdfNativeCbtQuestions(testId: string): Promise<TestQu
       const qMap = new Map<string, PdfNativeQuestion>();
       const localQList = await getLocalPdfNativeQuestions();
       localQList.forEach((q) => qMap.set(q.id, q));
+
+      const defaultPdfId = linkedSetRow?.source_pdf_id || linkedSetRow?.pdf_id || '';
+      const defaultPdfUrl = linkedSetRow?.pdf_url || '';
 
       questionRows.forEach((q) => {
         const rawBbox = q.bbox as any;
@@ -246,8 +258,8 @@ export async function fetchPdfNativeCbtQuestions(testId: string): Promise<TestQu
 
         qMap.set(q.id, {
           id: q.id,
-          pdf_id: q.pdf_id || setRow?.pdf_id || 'ref',
-          pdf_url: q.pdf_url || setRow?.pdf_url,
+          pdf_id: q.pdf_id || defaultPdfId,
+          pdf_url: q.pdf_url || defaultPdfUrl,
           question_number: q.question_number,
           page_start: Number(q.page_start) || 1,
           page_end: Number(q.page_end) || Number(q.page_start) || 1,

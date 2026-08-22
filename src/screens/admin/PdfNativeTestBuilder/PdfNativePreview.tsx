@@ -1,10 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View, Image, Platform, TouchableOpacity, Alert } from 'react-native';
-import { UploadCloud, FileText, RefreshCw, AlertCircle } from 'lucide-react-native';
+import { UploadCloud, RefreshCw, AlertCircle } from 'lucide-react-native';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PdfNativeQuestion } from '../../../services/pdf-native/pdfNativeTypes';
 import { renderPdfQuestionCompositeToCanvas } from '../../../services/pdf-native/pdfRegionRenderer';
-import { getPdfDocument, attachPdfBinary } from '../../../services/pdf-native/pdfDocumentCache';
+import { getPdfDocument, attachPdfBinary, evictPdfDocument } from '../../../services/pdf-native/pdfDocumentCache';
 import { pickSingle } from '../../../components/common/DocumentPickerWeb';
 import { colors, radius, spacing } from '../../../theme';
 
@@ -15,6 +15,7 @@ export interface PdfNativePreviewProps {
   showAdminDebug?: boolean;
   style?: any;
   onPdfAttached?: (doc: pdfjsLib.PDFDocumentProxy) => void;
+  onRetrySuccess?: (doc: pdfjsLib.PDFDocumentProxy) => void;
 }
 
 // Global in-memory render cache to prevent re-rendering and layout flicker
@@ -27,6 +28,7 @@ export function PdfNativePreviewComponent({
   showAdminDebug = false,
   style,
   onPdfAttached,
+  onRetrySuccess,
 }: PdfNativePreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -57,50 +59,59 @@ export function PdfNativePreviewComponent({
   const [isLoading, setIsLoading] = useState<boolean>(() => {
     return !!(cacheKey && !previewImageCache.has(cacheKey));
   });
+  const [isRetrying, setIsRetrying] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [isAttaching, setIsAttaching] = useState<boolean>(false);
   const [renderVersion, setRenderVersion] = useState<number>(0);
 
-  useEffect(() => {
-    if (!question) {
-      setDataUrl(null);
+  const executeRender = useCallback(
+    async (forceFresh = false) => {
+      if (!question) {
+        setDataUrl(null);
+        setError(null);
+        setIsLoading(false);
+        setIsRetrying(false);
+        return;
+      }
+
+      const hasValidRegions = question.regions && question.regions.length > 0;
+      if (bboxW <= 0 && !hasValidRegions) {
+        setError(`Invalid Bounding Box: [w=${bboxW}, h=${bboxH}]`);
+        setDataUrl(null);
+        setIsLoading(false);
+        setIsRetrying(false);
+        return;
+      }
+
+      // Check in-memory cache first to avoid re-rendering flicker (unless forcing fresh)
+      if (!forceFresh && cacheKey && previewImageCache.has(cacheKey)) {
+        setDataUrl(previewImageCache.get(cacheKey)!);
+        setError(null);
+        setIsLoading(false);
+        setIsRetrying(false);
+        return;
+      }
+
+      if (forceFresh) {
+        if (cacheKey) previewImageCache.delete(cacheKey);
+        if (qPdfId) evictPdfDocument(qPdfId);
+        if (qPdfUrl) evictPdfDocument(qPdfUrl);
+        setIsRetrying(true);
+      } else {
+        setIsLoading(true);
+      }
       setError(null);
-      setIsLoading(false);
-      return;
-    }
 
-    const hasValidRegions = question.regions && question.regions.length > 0;
-    if (bboxW <= 0 && !hasValidRegions) {
-      setError(`Invalid Bounding Box: [w=${bboxW}, h=${bboxH}]`);
-      setDataUrl(null);
-      setIsLoading(false);
-      return;
-    }
-
-    // Check in-memory cache first to avoid re-rendering flicker
-    if (cacheKey && previewImageCache.has(cacheKey)) {
-      setDataUrl(previewImageCache.get(cacheKey)!);
-      setError(null);
-      setIsLoading(false);
-      return;
-    }
-
-    let isMounted = true;
-    setIsLoading(true);
-    setError(null);
-
-    const renderTask = async () => {
       try {
-        // 1. Resolve PDF Document Proxy
-        let activeDoc = externalPdfDoc;
-        if (!activeDoc) {
-          activeDoc = await getPdfDocument({
-            pdfId: qPdfId,
-            pdfUrl: qPdfUrl,
-          });
+        // 1. Resolve authoritative PDF Document Proxy for this specific question
+        const activeDoc = await getPdfDocument({
+          pdfId: qPdfId,
+          pdfUrl: qPdfUrl,
+          forceFresh,
+        });
+        if (onRetrySuccess && activeDoc) {
+          onRetrySuccess(activeDoc);
         }
-
-        if (!isMounted) return;
 
         // 2. Render region/composite to canvas
         const canvas =
@@ -122,40 +133,45 @@ export function PdfNativePreviewComponent({
           previewImageCache.set(cacheKey, renderedUrl);
         }
 
-        if (isMounted) {
-          setDataUrl(renderedUrl);
-          setIsLoading(false);
-        }
+        setDataUrl(renderedUrl);
+        setIsLoading(false);
+        setIsRetrying(false);
+        setError(null);
       } catch (err) {
-        if (isMounted) {
-          console.warn('[PdfNativePreview] Render failure for question:', question.question_number, err);
-          setError(err instanceof Error ? err.message : 'Error rendering PDF question region');
-          setIsLoading(false);
-        }
+        console.warn('[PdfNativePreview] Render failure for question:', question.question_number, err);
+        setError(err instanceof Error ? err.message : 'Error rendering PDF question region');
+        setIsLoading(false);
+        setIsRetrying(false);
       }
-    };
+    },
+    [
+      bboxH,
+      bboxW,
+      cacheKey,
+      externalPdfDoc,
+      onRetrySuccess,
+      qPdfId,
+      qPdfUrl,
+      question,
+    ]
+  );
 
-    void renderTask();
-
+  useEffect(() => {
+    let isMounted = true;
+    void executeRender(false);
     return () => {
       isMounted = false;
     };
   }, [
-    externalPdfDoc,
-    qPdfUrl,
-    qPdfId,
-    qId,
-    qPage,
-    bboxX,
-    bboxY,
-    bboxW,
-    bboxH,
-    regionsKey,
-    cacheKey,
+    executeRender,
     renderVersion,
   ]);
 
-  // Handler to attach source PDF file directly from the preview card
+  const handleManualRetry = useCallback(() => {
+    void executeRender(true);
+  }, [executeRender]);
+
+  // Handler to attach source PDF file directly from the preview card (for Admin)
   const handleAttachSourcePdf = async () => {
     if (!question) return;
     try {
@@ -188,7 +204,7 @@ export function PdfNativePreviewComponent({
         picked.name
       );
 
-      const doc = await getPdfDocument({ buffer, pdfId: question.pdf_id });
+      const doc = await getPdfDocument({ buffer, pdfId: question.pdf_id, forceFresh: true });
       if (onPdfAttached) {
         onPdfAttached(doc);
       }
@@ -217,7 +233,7 @@ export function PdfNativePreviewComponent({
 
   const aspectRatio =
     question && question.bbox && question.bbox.height > 0
-      ? Math.max(0.2, Math.min(10, question.bbox.width / question.bbox.height))
+      ? Math.max(0.1, Math.min(10, question.bbox.width / question.bbox.height))
       : 16 / 9;
 
   const isSourceMissing = error && error.includes('PDF_SOURCE_MISSING');
@@ -239,12 +255,22 @@ export function PdfNativePreviewComponent({
       ) : null}
 
       <View style={[styles.previewBox, !showAdminDebug && styles.studentPreviewBox]}>
-        {isLoading ? (
+        {/* 1. RETRYING STATE */}
+        {isRetrying ? (
           <View style={styles.loadingWrap}>
-            <ActivityIndicator size="small" color={colors.primary} />
-            <Text style={styles.loadingText}>Rendering crisp original question...</Text>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={styles.loadingTitle}>Retrying PDF...</Text>
+            <Text style={styles.loadingText}>Fetching authoritative question paper</Text>
           </View>
-        ) : error ? (
+        ) : /* 2. LOADING STATE */
+        isLoading ? (
+          <View style={styles.loadingWrap}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={styles.loadingTitle}>Loading question paper...</Text>
+            <Text style={styles.loadingText}>Rendering original vector question region</Text>
+          </View>
+        ) : /* 3. ERROR STATE (FAIL-CLOSED) */
+        error ? (
           showAdminDebug ? (
             <View style={styles.errorWrap}>
               <Text style={styles.errorTitle}>
@@ -273,14 +299,23 @@ export function PdfNativePreviewComponent({
             </View>
           ) : (
             <View style={styles.studentErrorWrap}>
-              <AlertCircle size={28} color="#DC2626" />
-              <Text style={styles.studentErrorTitle}>Question Unavailable</Text>
+              <AlertCircle size={32} color="#DC2626" />
+              <Text style={styles.studentErrorTitle}>Unable to load the original question paper.</Text>
               <Text style={styles.studentErrorSub}>
-                Original PDF region could not be loaded. Please contact the administrator.
+                Please check your internet connection and try again.
               </Text>
+              <TouchableOpacity
+                style={styles.retryBtn}
+                onPress={handleManualRetry}
+                activeOpacity={0.7}
+              >
+                <RefreshCw size={16} color={colors.white} />
+                <Text style={styles.retryBtnText}>Retry</Text>
+              </TouchableOpacity>
             </View>
           )
-        ) : dataUrl ? (
+        ) : /* 4. SUCCESS STATE */
+        dataUrl ? (
           <View style={[styles.imageWrap, { aspectRatio }]}>
             <Image
               source={{ uri: dataUrl }}
@@ -372,14 +407,22 @@ const styles = StyleSheet.create({
     padding: spacing.sm,
   },
   studentPreviewBox: {
-    minHeight: 80,
+    minHeight: 120,
     padding: 0,
     backgroundColor: '#FFFFFF',
   },
   loadingWrap: {
     paddingVertical: spacing.xl,
     alignItems: 'center',
+    justifyContent: 'center',
     gap: spacing.xs,
+    width: '100%',
+  },
+  loadingTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text,
+    marginTop: spacing.xs,
   },
   loadingText: {
     fontSize: 12,
@@ -432,20 +475,42 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     marginVertical: spacing.md,
     gap: spacing.xs,
-    width: '90%',
+    width: '100%',
     alignSelf: 'center',
   },
   studentErrorTitle: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '800',
     color: '#991B1B',
     marginTop: spacing.xs,
+    textAlign: 'center',
   },
   studentErrorSub: {
     fontSize: 13,
-    color: '#B91C1C',
+    color: '#7F1D1D',
     textAlign: 'center',
     maxWidth: 360,
+    marginBottom: spacing.xs,
+  },
+  retryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: colors.primary,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xl,
+    borderRadius: radius.pill,
+    marginTop: spacing.xs,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  retryBtnText: {
+    color: colors.white,
+    fontSize: 14,
+    fontWeight: '700',
   },
   imageWrap: {
     width: '100%',

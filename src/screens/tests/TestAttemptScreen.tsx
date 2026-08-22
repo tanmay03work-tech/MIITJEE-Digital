@@ -14,6 +14,7 @@ import { Card } from '../../components/common/Card';
 import { Screen } from '../../components/common/Screen';
 import { OptionCard } from '../../components/tests/OptionCard';
 import { QuestionPaletteSheet } from '../../components/tests/QuestionPaletteSheet';
+import { QuestionBodyRenderer } from '../../components/tests/QuestionBodyRenderer';
 import { RootStackScreenProps } from '../../navigation/types';
 import { fetchExistingAttemptForTest, logViolation, fetchTests } from '../../services/api/tests';
 import { activityLog } from '../../services/api/activityLogger';
@@ -34,8 +35,8 @@ import { mapPdfNativeTestToCbtTestItem, fetchPdfNativeCbtQuestions } from '../..
 import { PdfNativeQuestion } from '../../services/pdf-native/pdfNativeTypes';
 import { PdfNativePreview } from '../admin/PdfNativeTestBuilder/PdfNativePreview';
 
-const MAX_WARNINGS = 2;
-const AUTO_SUBMIT_THRESHOLD = 3;
+const MAX_WARNINGS = 3;
+const AUTO_SUBMIT_THRESHOLD = 4;
 const VIOLATION_DEBOUNCE_MS = 2000;
 
 interface ExamTimerCardProps {
@@ -84,7 +85,7 @@ const ExamTimerCard = React.memo(function ExamTimerCard({
       </View>
       {isWeeklyProctored ? (
         <Text style={styles.proctoringHint}>
-          Weekly paper protection is active. Leaving the app more than 3 times will auto-submit this paper.
+          Weekly paper protection is active. Leaving the app 4 times will auto-submit this paper.
         </Text>
       ) : null}
     </Card>
@@ -252,15 +253,21 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
           return;
         }
 
-        // If any question is PDF-Native, load the PDF document proxy client-side for region rendering
-        const hasPdfNativeQuestion = fetchedQuestions.some((q) => q.pdfNativeBbox);
+        // If any question or test is PDF-Native, load and cache the PDF document proxy client-side for region rendering
+        const hasPdfNativeQuestion =
+          Boolean(activeTest.isPdfNative) ||
+          Boolean(testId && (testId.startsWith('pdf_') || testId.startsWith('set_') || testId.includes('pdf_test_'))) ||
+          fetchedQuestions.some((q) => q.pdfNativeBbox || (q.pdfNativeRegions && q.pdfNativeRegions.length > 0) || q.pdfUrl || q.pdfId);
+
         if (hasPdfNativeQuestion) {
           try {
             const firstQ = fetchedQuestions.find((q) => q.pdfUrl || q.pdfId);
-            if (firstQ) {
+            const resolvedPdfId = firstQ?.pdfId || (activeTest as any)?.pdfId || (activeTest as any)?.source_pdf_id;
+            const resolvedPdfUrl = firstQ?.pdfUrl || (activeTest as any)?.pdfUrl;
+            if (resolvedPdfId || resolvedPdfUrl) {
               const doc = await getPdfDocument({
-                pdfId: firstQ.pdfId,
-                pdfUrl: firstQ.pdfUrl,
+                pdfId: resolvedPdfId,
+                pdfUrl: resolvedPdfUrl,
               });
               if (isMounted) setPdfDoc(doc);
             }
@@ -608,7 +615,8 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
 
   const isPdfExam = useMemo(() => {
     return (
-      !!test?.isPdfNative ||
+      Boolean(test?.isPdfNative) ||
+      Boolean(testId && (testId.startsWith('pdf_') || testId.startsWith('set_') || testId.includes('pdf_test_'))) ||
       questions.some(
         (q) =>
           !!q.pdfNativeBbox ||
@@ -617,7 +625,7 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
           !!q.pdfId
       )
     );
-  }, [test?.isPdfNative, questions]);
+  }, [test?.isPdfNative, testId, questions]);
 
   // Stable memoized question object for PDF-Native rendering
   const pdfNativeQuestion = useMemo<PdfNativeQuestion | null>(() => {
@@ -709,7 +717,10 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
       if (!currentQuestionId) {
         return;
       }
-      if (selectedAnswer === answer || selectedAnswer === `Option ${answer}`) {
+      const normSelected = (selectedAnswer || '').trim().replace(/^Option\s+/i, '').toLowerCase();
+      const normInput = (answer || '').trim().replace(/^Option\s+/i, '').toLowerCase();
+
+      if (normSelected && (normSelected === normInput || selectedAnswer === answer)) {
         clearResponse(currentQuestionId);
         return;
       }
@@ -756,27 +767,18 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
           <Text style={styles.questionMeta}>{unansweredCount} left unanswered</Text>
         </View>
 
-        {isPdfQuestion ? (
+        {isPdfExam || isPdfQuestion ? (
           /* ============= PDF-NATIVE EXAM (ONLY ORIGINAL PDF REGION) ============= */
           <View style={styles.pdfNativeSection}>
             {/* 1. Original PDF Region View (Immutable Visual Source of Truth) */}
             <View style={styles.pdfFrame}>
-              {pdfNativeQuestion ? (
-                <PdfNativePreview
-                  pdfDoc={pdfDoc}
-                  pdfUrl={currentQuestion.pdfUrl || pdfNativeQuestion.pdf_url || (test as any)?.pdfUrl}
-                  question={pdfNativeQuestion}
-                  showAdminDebug={false}
-                />
-              ) : (
-                <View style={styles.pdfNativeErrorCard}>
-                  <AlertCircle size={28} color="#DC2626" />
-                  <Text style={styles.pdfNativeErrorTitle}>Question Unavailable</Text>
-                  <Text style={styles.pdfNativeErrorSub}>
-                    Original PDF region could not be loaded. Please contact the administrator.
-                  </Text>
-                </View>
-              )}
+              <PdfNativePreview
+                pdfDoc={pdfDoc}
+                pdfUrl={currentQuestion.pdfUrl || pdfNativeQuestion?.pdf_url || (test as any)?.pdfUrl}
+                question={pdfNativeQuestion}
+                showAdminDebug={false}
+                onRetrySuccess={(newDoc) => setPdfDoc(newDoc)}
+              />
             </View>
 
             {/* 2. Answer Selection Interaction (A, B, C, D or Numeric Input) */}
@@ -837,11 +839,10 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
         ) : (
           /* ============= STANDARD CBT QUESTION RENDERING (NON-PDF-NATIVE ONLY) ============= */
           <>
-            <Text style={styles.questionText}>{currentQuestionPrompt}</Text>
-
-            {currentQuestion.imageUrl ? (
-              <Image source={{ uri: currentQuestion.imageUrl }} style={styles.questionImage} resizeMode="contain" />
-            ) : null}
+            <QuestionBodyRenderer
+              prompt={currentQuestion.prompt}
+              imageUrl={currentQuestion.imageUrl}
+            />
 
             {currentQuestion.type === 'integer' ? (
               <View style={styles.integerCard}>
@@ -870,14 +871,22 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
                   const isOptionSelected =
                     selectedAnswer === option ||
                     selectedAnswer === badgeLetter ||
-                    selectedAnswer === `Option ${badgeLetter}`;
+                    selectedAnswer === `Option ${badgeLetter}` ||
+                    (typeof selectedAnswer === 'string' &&
+                      selectedAnswer.trim().toLowerCase() === option.trim().toLowerCase());
                   return (
                     <OptionCard
                       key={`${currentQuestion.id}_${optionIndex}`}
                       badgeLabel={badgeLetter}
                       label={option}
                       selected={isOptionSelected}
-                      onPress={() => handleSelectAnswer(option)}
+                      onPress={() => {
+                        if (isOptionSelected) {
+                          handleClearResponse();
+                        } else {
+                          handleSelectAnswer(option);
+                        }
+                      }}
                       imageUrl={currentQuestion.optionImageUrls?.[optionIndex]}
                     />
                   );
@@ -958,6 +967,7 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
         title={test.title}
         subtitle={`Question ${currentIndex + 1} of ${questions.length}`}
         compact
+        showBack={false}
         rightSlot={
           <AnimatedPressable style={styles.iconButton} onPress={handleTogglePalette}>
             <LayoutGrid size={18} color={colors.primary} />

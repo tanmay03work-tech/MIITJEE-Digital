@@ -1,6 +1,6 @@
 describe('Phase 2 - Tab Switch & Focus Detection Logic', () => {
-  const MAX_WARNINGS = 2;
-  const AUTO_SUBMIT_THRESHOLD = 3;
+  const MAX_WARNINGS = 3;
+  const AUTO_SUBMIT_THRESHOLD = 4;
   const DEBOUNCE_MS = 2000;
 
   class ViolationTracker {
@@ -25,7 +25,7 @@ describe('Phase 2 - Tab Switch & Focus Detection Logic', () => {
         this.messages.push(msg);
       } else {
         this.isAutoSubmitted = true;
-        this.messages.push('Auto-submitting paper due to 3rd violation.');
+        this.messages.push('Auto-submitting paper due to 4th violation.');
       }
     }
   }
@@ -36,31 +36,42 @@ describe('Phase 2 - Tab Switch & Focus Detection Logic', () => {
     expect(tracker.isAutoSubmitted).toBe(false);
   });
 
-  test('Test 2: First tab switch produces Warning 1/2', () => {
+  test('Test 2: First tab switch produces Warning 1/3', () => {
     const tracker = new ViolationTracker();
     tracker.handleViolation(1000);
     expect(tracker.count).toBe(1);
     expect(tracker.isAutoSubmitted).toBe(false);
-    expect(Boolean(tracker.messages[0]?.includes('Warning 1/2'))).toBe(true);
+    expect(Boolean(tracker.messages[0]?.includes('Warning 1/3'))).toBe(true);
   });
 
-  test('Test 3: Second tab switch produces Final Warning 2/2', () => {
+  test('Test 3: Second tab switch produces Warning 2/3', () => {
     const tracker = new ViolationTracker();
     tracker.handleViolation(1000);
     tracker.handleViolation(4000); // After debounce
     expect(tracker.count).toBe(2);
     expect(tracker.isAutoSubmitted).toBe(false);
-    expect(Boolean(tracker.messages[1]?.includes('Final warning 2/2'))).toBe(true);
+    expect(Boolean(tracker.messages[1]?.includes('Warning 2/3'))).toBe(true);
   });
 
-  test('Test 4: Third tab switch triggers Auto Submit', () => {
+  test('Test 4: Third tab switch produces Final warning 3/3', () => {
     const tracker = new ViolationTracker();
     tracker.handleViolation(1000);
     tracker.handleViolation(4000);
     tracker.handleViolation(7000);
     expect(tracker.count).toBe(3);
+    expect(tracker.isAutoSubmitted).toBe(false);
+    expect(Boolean(tracker.messages[2]?.includes('Final warning 3/3'))).toBe(true);
+  });
+
+  test('Test 5: Fourth tab switch triggers Auto Submit', () => {
+    const tracker = new ViolationTracker();
+    tracker.handleViolation(1000);
+    tracker.handleViolation(4000);
+    tracker.handleViolation(7000);
+    tracker.handleViolation(10000);
+    expect(tracker.count).toBe(4);
     expect(tracker.isAutoSubmitted).toBe(true);
-    expect(Boolean(tracker.messages[2]?.includes('Auto-submitting'))).toBe(true);
+    expect(Boolean(tracker.messages[3]?.includes('Auto-submitting'))).toBe(true);
   });
 
   test('Test 5: Rapid double-blur within debounce window is ignored', () => {
