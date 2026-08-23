@@ -77,7 +77,12 @@ export function TestResultScreen({ route, navigation }: RootStackScreenProps<'Te
         reviews.forEach((item, index) => {
           let sub = questionSubjectMap[item.questionId];
           if (!sub) {
-            if (defaultSubject.toLowerCase().includes('physics') && defaultSubject.toLowerCase().includes('chem')) {
+            const lowerDef = defaultSubject.toLowerCase();
+            if (lowerDef.includes('bio') || lowerDef.includes('pcb') || reviews.length === 180) {
+              if (index < 45) sub = 'Physics';
+              else if (index < 90) sub = 'Chemistry';
+              else sub = 'Biology';
+            } else if (lowerDef.includes('physics') && lowerDef.includes('chem')) {
               const third = Math.ceil(reviews.length / 3);
               if (index < third) sub = 'Physics';
               else if (index < third * 2) sub = 'Chemistry';
@@ -114,17 +119,27 @@ export function TestResultScreen({ route, navigation }: RootStackScreenProps<'Te
           }
         });
 
-        const list: SubjectScoreItem[] = Object.keys(breakdownMap).map((key) => {
-          const entry = breakdownMap[key]!;
-          return {
-            subject: key,
-            correct: entry.correct,
-            wrong: entry.wrong,
-            unattempted: entry.unattempted,
-            score: entry.score,
-            total: entry.total,
-          };
-        });
+        const standardOrder = ['Physics', 'Chemistry', 'Biology', 'Mathematics'];
+        const list: SubjectScoreItem[] = Object.keys(breakdownMap)
+          .sort((a, b) => {
+            const idxA = standardOrder.indexOf(a);
+            const idxB = standardOrder.indexOf(b);
+            if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+            if (idxA !== -1) return -1;
+            if (idxB !== -1) return 1;
+            return a.localeCompare(b);
+          })
+          .map((key) => {
+            const entry = breakdownMap[key]!;
+            return {
+              subject: key,
+              correct: entry.correct,
+              wrong: entry.wrong,
+              unattempted: entry.unattempted,
+              score: entry.score,
+              total: entry.total,
+            };
+          });
 
         if (active) {
           setSubjectBreakdown(list);
