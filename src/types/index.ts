@@ -451,6 +451,19 @@ export interface EnquiryRecord {
   userId?: string;
 }
 
+export interface ReattemptRequestRecord {
+  id: string;
+  testId: string;
+  testTitle: string;
+  userId?: string;
+  studentName: string;
+  phone?: string;
+  reason?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+  approvedAt?: string;
+}
+
 export interface SignInPayload {
   email: string;
   password: string;

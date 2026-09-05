@@ -22,10 +22,11 @@ import {
   scholarshipTargetLabels,
   scholarshipTargetOptions,
 } from '../../constants/scholarship';
-import { ScholarshipAdmissionClass, ScholarshipTargetExam, TestResult } from '../../types';
+import { ScholarshipAdmissionClass, ScholarshipTargetExam, TestResult, ReattemptRequestRecord } from '../../types';
 import { updateRows } from '../../services/supabase/client';
 import { getTestLockedMessage, getTestStatusLabel, isTestActive } from '../../utils/testAvailability';
 import { fetchExistingAttemptForTest } from '../../services/api/tests';
+import { fetchReattemptStatusForTest, submitReattemptRequest } from '../../services/api/reattemptRequests';
 
 import { NAVIGATOR_BATCH_TEST_ID, NAVIGATOR_BATCH_TEST_ITEM } from '../../services/api/navigatorBatchTestData';
 
@@ -58,6 +59,10 @@ export function TestIntroScreen({ route, navigation }: RootStackScreenProps<'Tes
   );
   const [showNameModal, setShowNameModal] = useState(false);
   const [promptName, setPromptName] = useState(user?.fullName ?? '');
+  const [reattemptRecord, setReattemptRecord] = useState<ReattemptRequestRecord | null>(null);
+  const [showReattemptForm, setShowReattemptForm] = useState(false);
+  const [reattemptPhone, setReattemptPhone] = useState('');
+  const [reattemptReason, setReattemptReason] = useState('');
 
   const handleSaveNameAndStart = async () => {
     const trimmedName = promptName.trim();
@@ -134,11 +139,73 @@ export function TestIntroScreen({ route, navigation }: RootStackScreenProps<'Tes
             setExistingAttempt(cachedExistingAttempt);
           }
         });
+
+      fetchReattemptStatusForTest(test.id, user?.id, user?.fullName)
+        .then((statusRecord) => {
+          if (isMounted) {
+            setReattemptRecord(statusRecord);
+          }
+        })
+        .catch(() => {
+          // Ignore
+        });
     }
     return () => {
       isMounted = false;
     };
-  }, [test?.id, user?.id, cachedExistingAttempt?.id]);
+  }, [test?.id, user?.id, user?.fullName, cachedExistingAttempt?.id]);
+
+  const handleCheckReattemptStatus = async () => {
+    if (!test?.id) return;
+    try {
+      showLoader({ title: 'Checking Status', subtitle: 'Fetching latest re-attempt approval...' });
+      const record = await fetchReattemptStatusForTest(test.id, user?.id, user?.fullName || promptName);
+      setReattemptRecord(record);
+      if (record?.status === 'approved') {
+        Alert.alert('Re-attempt Approved!', 'The admin has approved your re-attempt request. You can now start the exam.');
+      } else if (record?.status === 'pending') {
+        Alert.alert('Request Pending', 'Your request is currently awaiting admin approval. Please check back shortly.');
+      } else if (record?.status === 'rejected') {
+        Alert.alert('Request Declined', 'Your re-attempt request was declined by the admin.');
+      } else {
+        Alert.alert('No Request Found', 'No re-attempt request has been submitted yet.');
+      }
+    } finally {
+      hideLoader();
+    }
+  };
+
+  const handleSendReattemptRequest = async () => {
+    const trimmedName = promptName.trim();
+    if (!trimmedName) {
+      Alert.alert('Name Required', 'Please enter your full name before submitting the re-attempt request.');
+      return;
+    }
+    if (!test) return;
+
+    try {
+      showLoader({ title: 'Sending Request', subtitle: 'Submitting re-attempt request to admin...' });
+      const record = await submitReattemptRequest({
+        testId: test.id,
+        testTitle: test.title,
+        userId: user?.id,
+        studentName: trimmedName,
+        phone: reattemptPhone.trim() || undefined,
+        reason: reattemptReason.trim() || undefined,
+      });
+
+      setReattemptRecord(record);
+      setShowReattemptForm(false);
+      Alert.alert(
+        'Request Sent to Admin',
+        'Your re-attempt request has been submitted. The admin will review it and once approved, you can start the exam.',
+      );
+    } catch (err) {
+      Alert.alert('Submission Failed', err instanceof Error ? err.message : 'Unable to send request right now.');
+    } finally {
+      hideLoader();
+    }
+  };
 
   const handleEnrollmentSubmit = async () => {
     if (!enrollmentBatchId || !phone.trim() || !message.trim()) {
@@ -291,24 +358,128 @@ export function TestIntroScreen({ route, navigation }: RootStackScreenProps<'Tes
           </AnimatedPressable>
         </Card>
       ) : existingAttempt ? (
-        <View style={{ gap: spacing.md }}>
-          <AnimatedPressable
-            style={styles.startButton}
-            onPress={() => navigation.navigate('TestResult', { testId: test.id, resultId: existingAttempt.id })}>
-            <Text style={styles.startText}>View Result</Text>
-          </AnimatedPressable>
-          <AnimatedPressable
-            style={[styles.startButton, { backgroundColor: colors.surface, borderColor: colors.primary, borderWidth: 1 }]}
-            onPress={() => {
-              if (!testActive && user?.role !== 'admin') {
-                Alert.alert('Paper locked', getTestLockedMessage(test));
-                return;
-              }
-              setShowNameModal(true);
-            }}>
-            <Text style={[styles.startText, { color: colors.primary }]}>Re-attempt Paper</Text>
-          </AnimatedPressable>
-        </View>
+        showReattemptForm ? (
+          <Card style={styles.formCard}>
+            <Text style={styles.sectionTitle}>Request Paper Re-attempt</Text>
+            <Text style={styles.helperText}>
+              Send a request to the admin team to get approval for re-attempting this paper.
+            </Text>
+            <InputField
+              label="Full Name *"
+              value={promptName}
+              onChangeText={setPromptName}
+              placeholder="Enter your full name"
+            />
+            <InputField
+              label="Phone Number (Optional)"
+              value={reattemptPhone}
+              onChangeText={setReattemptPhone}
+              keyboardType="phone-pad"
+              placeholder="Enter your phone number"
+            />
+            <InputField
+              label="Reason for Re-attempt (Optional)"
+              value={reattemptReason}
+              onChangeText={setReattemptReason}
+              placeholder="e.g. Disconnected during exam / Network issue"
+              multiline
+              style={styles.multilineInput}
+            />
+            <AnimatedPressable style={styles.startButton} onPress={() => void handleSendReattemptRequest()}>
+              <Text style={styles.startText}>Send Request to Admin</Text>
+            </AnimatedPressable>
+            <AnimatedPressable
+              style={[styles.startButton, { backgroundColor: colors.surfaceMuted, marginTop: spacing.xs }]}
+              onPress={() => setShowReattemptForm(false)}>
+              <Text style={[styles.startText, { color: colors.textMuted }]}>Cancel</Text>
+            </AnimatedPressable>
+          </Card>
+        ) : reattemptRecord?.status === 'approved' ? (
+          <Card style={[styles.formCard, { borderColor: '#10B981', borderWidth: 1.5 }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+              <Badge label="Approved by Admin" tone="success" />
+              <Text style={[styles.sectionTitle, { fontSize: 16, color: '#10B981' }]}>Re-attempt Granted</Text>
+            </View>
+            <Text style={styles.instruction}>
+              The admin team has approved your request. You can now start a fresh attempt of this paper.
+            </Text>
+            <AnimatedPressable
+              style={[styles.startButton, { backgroundColor: '#10B981' }]}
+              onPress={() => {
+                if (!testActive && user?.role !== 'admin') {
+                  Alert.alert('Paper locked', getTestLockedMessage(test));
+                  return;
+                }
+                setShowNameModal(true);
+              }}>
+              <Text style={styles.startText}>Start Re-attempt Paper</Text>
+            </AnimatedPressable>
+            <AnimatedPressable
+              style={[styles.startButton, { backgroundColor: colors.surfaceMuted, marginTop: spacing.xs }]}
+              onPress={() => navigation.navigate('TestResult', { testId: test.id, resultId: existingAttempt.id })}>
+              <Text style={[styles.startText, { color: colors.textMuted }]}>View Result</Text>
+            </AnimatedPressable>
+          </Card>
+        ) : reattemptRecord?.status === 'pending' ? (
+          <Card style={[styles.formCard, { borderColor: '#F59E0B', borderWidth: 1.5 }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+              <Badge label="Pending Admin Approval" tone="warning" />
+              <Text style={[styles.sectionTitle, { fontSize: 16, color: '#F59E0B' }]}>Re-attempt Requested</Text>
+            </View>
+            <Text style={styles.instruction}>
+              Your request to re-attempt this paper has been submitted to the admin team for review. Once approved, you will be able to start the exam.
+            </Text>
+            <AnimatedPressable
+              style={[styles.startButton, { backgroundColor: colors.primary }]}
+              onPress={() => void handleCheckReattemptStatus()}>
+              <Text style={styles.startText}>Check Approval Status</Text>
+            </AnimatedPressable>
+            <AnimatedPressable
+              style={[styles.startButton, { backgroundColor: colors.surfaceMuted, marginTop: spacing.xs }]}
+              onPress={() => navigation.navigate('TestResult', { testId: test.id, resultId: existingAttempt.id })}>
+              <Text style={[styles.startText, { color: colors.textMuted }]}>View Result</Text>
+            </AnimatedPressable>
+          </Card>
+        ) : reattemptRecord?.status === 'rejected' ? (
+          <Card style={[styles.formCard, { borderColor: colors.danger, borderWidth: 1.5 }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+              <Badge label="Declined" tone="danger" />
+              <Text style={[styles.sectionTitle, { fontSize: 16, color: colors.danger }]}>Re-attempt Declined</Text>
+            </View>
+            <Text style={styles.instruction}>
+              Your previous request to re-attempt this paper was declined by the admin team.
+            </Text>
+            <AnimatedPressable
+              style={[styles.startButton, { backgroundColor: colors.primary }]}
+              onPress={() => setShowReattemptForm(true)}>
+              <Text style={styles.startText}>Send New Request</Text>
+            </AnimatedPressable>
+            <AnimatedPressable
+              style={[styles.startButton, { backgroundColor: colors.surfaceMuted, marginTop: spacing.xs }]}
+              onPress={() => navigation.navigate('TestResult', { testId: test.id, resultId: existingAttempt.id })}>
+              <Text style={[styles.startText, { color: colors.textMuted }]}>View Result</Text>
+            </AnimatedPressable>
+          </Card>
+        ) : (
+          <View style={{ gap: spacing.md }}>
+            <AnimatedPressable
+              style={styles.startButton}
+              onPress={() => navigation.navigate('TestResult', { testId: test.id, resultId: existingAttempt.id })}>
+              <Text style={styles.startText}>View Result</Text>
+            </AnimatedPressable>
+            <AnimatedPressable
+              style={[styles.startButton, { backgroundColor: colors.surface, borderColor: colors.primary, borderWidth: 1 }]}
+              onPress={() => {
+                if (!testActive && user?.role !== 'admin') {
+                  Alert.alert('Paper locked', getTestLockedMessage(test));
+                  return;
+                }
+                setShowReattemptForm(true);
+              }}>
+              <Text style={[styles.startText, { color: colors.primary }]}>Request Re-attempt</Text>
+            </AnimatedPressable>
+          </View>
+        )
       ) : test.type === 'scholarship' ? (
         <Card style={styles.formCard}>
           <Text style={styles.sectionTitle}>Scholarship Details</Text>

@@ -75,7 +75,14 @@ import {
   TestResult,
   UpdateTestPayload,
   ViolationSummary,
+  ReattemptRequestRecord,
 } from '../types';
+import {
+  fetchReattemptRequests,
+  submitReattemptRequest,
+  updateReattemptRequestStatus,
+  deleteReattemptRequest,
+} from '../services/api/reattemptRequests';
 import { normalizeExamText } from '../utils/examText';
 import { logError } from '../utils/logger';
 
@@ -147,6 +154,11 @@ interface AppState {
   deleteEnrollmentQuery: (queryId: string) => Promise<void>;
   deleteScholarshipRegistration: (registrationId: string) => Promise<void>;
   deleteGeneralEnquiry: (enquiryId: string) => Promise<void>;
+  reattemptRequests: ReattemptRequestRecord[];
+  loadReattemptRequests: () => Promise<ReattemptRequestRecord[]>;
+  submitReattemptRequest: (payload: { testId: string; testTitle: string; userId?: string; studentName: string; phone?: string; reason?: string }) => Promise<ReattemptRequestRecord>;
+  updateReattemptRequestStatus: (requestId: string, status: 'pending' | 'approved' | 'rejected') => Promise<void>;
+  deleteReattemptRequest: (requestId: string) => Promise<void>;
   reset: () => void;
 }
 
@@ -249,6 +261,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   enquiries: [],
   enrollmentQueries: [],
   scholarshipRegistrations: [],
+  reattemptRequests: [],
   autoSubmitEvents: [],
   violationAnalytics: [],
   activityLogs: [],
@@ -425,8 +438,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         withFallback(() => fetchScholarshipRegistrations(), get().scholarshipRegistrations),
         withFallback(() => fetchEnquiries(), get().enquiries),
         withFallback(() => fetchResults(undefined, { limit: 20, offset: 0 }), get().results),
+        withFallback(() => fetchReattemptRequests(), get().reattemptRequests),
       ])
-        .then(([autoSubmitEvents, violationAnalytics, enrollmentQueries, scholarshipRegistrations, enquiries, results]) => {
+        .then(([autoSubmitEvents, violationAnalytics, enrollmentQueries, scholarshipRegistrations, enquiries, results, reattemptRequests]) => {
           set({
             autoSubmitEvents,
             violationAnalytics,
@@ -434,6 +448,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             scholarshipRegistrations,
             enquiries,
             results,
+            reattemptRequests,
             adminDataFetchedAt: Date.now(),
           });
         })
@@ -975,6 +990,33 @@ export const useAppStore = create<AppState>((set, get) => ({
       enquiries: state.enquiries.filter((entry) => entry.id !== enquiryId),
     }));
   },
+  loadReattemptRequests: async () => {
+    const list = await fetchReattemptRequests();
+    set({ reattemptRequests: list });
+    return list;
+  },
+  submitReattemptRequest: async (payload) => {
+    const record = await submitReattemptRequest(payload);
+    set((state) => ({
+      reattemptRequests: [record, ...state.reattemptRequests.filter((r) => r.id !== record.id)],
+    }));
+    return record;
+  },
+  updateReattemptRequestStatus: async (requestId, status) => {
+    await updateReattemptRequestStatus(requestId, status);
+    const approvedAt = status === 'approved' ? new Date().toISOString() : undefined;
+    set((state) => ({
+      reattemptRequests: state.reattemptRequests.map((r) =>
+        r.id === requestId ? { ...r, status, approvedAt } : r
+      ),
+    }));
+  },
+  deleteReattemptRequest: async (requestId) => {
+    await deleteReattemptRequest(requestId);
+    set((state) => ({
+      reattemptRequests: state.reattemptRequests.filter((r) => r.id !== requestId),
+    }));
+  },
   reset: () =>
     set({
       courses: [],
@@ -1002,6 +1044,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       enquiries: [],
       enrollmentQueries: [],
       scholarshipRegistrations: [],
+      reattemptRequests: [],
       autoSubmitEvents: [],
       violationAnalytics: [],
       studentInsights: undefined,

@@ -1,6 +1,6 @@
 import React, { memo } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
-import { ShieldAlert, Trash2 } from 'lucide-react-native';
+import { CheckCircle2, ShieldAlert, Trash2, XCircle } from 'lucide-react-native';
 
 import { AnimatedPressable } from '../common/AnimatedPressable';
 import { Badge } from '../common/Badge';
@@ -8,7 +8,7 @@ import { Card } from '../common/Card';
 import { EmptyState } from '../common/EmptyState';
 import { SelectField, SelectOption } from '../common/SelectField';
 import { colors, spacing } from '../../theme';
-import { EnquiryRecord, EnrollmentQueryRecord, ScholarshipRegistrationRecord, TestItem, TestResult, AppUser } from '../../types';
+import { EnquiryRecord, EnrollmentQueryRecord, ScholarshipRegistrationRecord, TestItem, TestResult, AppUser, ReattemptRequestRecord } from '../../types';
 import { formatDateLabel } from '../../utils/formatters';
 
 interface DeleteButtonProps {
@@ -38,6 +38,13 @@ interface BatchAccessCardProps {
 interface EnquiryCardProps {
   enquiry: EnquiryRecord;
   onDelete: (enquiryId: string) => Promise<void>;
+}
+
+interface ReattemptCardProps {
+  request: ReattemptRequestRecord;
+  onApprove: (requestId: string) => Promise<void>;
+  onReject: (requestId: string) => Promise<void>;
+  onDelete: (requestId: string) => Promise<void>;
 }
 
 function DeleteButton({ label, onPress }: DeleteButtonProps) {
@@ -244,6 +251,110 @@ export const GeneralEnquiryCard = memo(function GeneralEnquiryCard({ enquiry, on
           ])
         }
       />
+    </Card>
+  );
+});
+
+export const ReattemptEmptyState = memo(function ReattemptEmptyState() {
+  return (
+    <EmptyState
+      icon={ShieldAlert}
+      title="No re-attempt requests"
+      description="Requests from students asking permission to re-take a test will appear here."
+    />
+  );
+});
+
+export const ReattemptRequestCard = memo(function ReattemptRequestCard({
+  request,
+  onApprove,
+  onReject,
+  onDelete,
+}: ReattemptCardProps) {
+  const isApproved = request.status === 'approved';
+  const isPending = request.status === 'pending';
+  const isRejected = request.status === 'rejected';
+
+  return (
+    <Card style={styles.dataCard}>
+      <View style={styles.headerRow}>
+        <Badge
+          label={isApproved ? 'Approved' : isRejected ? 'Declined' : 'Pending Approval'}
+          tone={isApproved ? 'success' : isRejected ? 'danger' : 'warning'}
+        />
+        <Badge label={formatDateLabel(request.createdAt)} tone="neutral" />
+      </View>
+      <Text style={styles.title}>{request.studentName}</Text>
+      <Text style={[styles.emphasis, { color: colors.primary }]}>{request.testTitle}</Text>
+      {request.phone ? <Text style={styles.meta}>Phone: {request.phone}</Text> : null}
+      {request.reason ? <Text style={styles.message}>Reason: {request.reason}</Text> : null}
+      
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.xs, flexWrap: 'wrap' }}>
+        {isPending || isRejected ? (
+          <AnimatedPressable
+            style={[styles.deleteButton, { backgroundColor: '#ECFDF5', borderColor: '#10B981' }]}
+            onPress={() =>
+              Alert.alert('Approve Re-attempt?', `Allow ${request.studentName} to re-attempt "${request.testTitle}"?`, [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Approve',
+                  onPress: () => {
+                    void onApprove(request.id).then(() => {
+                      Alert.alert('Approved', `Re-attempt permission granted for ${request.studentName}.`);
+                    }).catch((error) => {
+                      Alert.alert('Approval failed', error instanceof Error ? error.message : 'Unable to approve request.');
+                    });
+                  },
+                },
+              ])
+            }>
+            <CheckCircle2 size={15} color="#10B981" />
+            <Text style={[styles.deleteButtonText, { color: '#10B981' }]}>Approve Re-attempt</Text>
+          </AnimatedPressable>
+        ) : null}
+
+        {isPending || isApproved ? (
+          <AnimatedPressable
+            style={[styles.deleteButton, { backgroundColor: '#FEF2F2', borderColor: '#EF4444' }]}
+            onPress={() =>
+              Alert.alert('Decline Request?', `Decline re-attempt request for ${request.studentName}?`, [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Decline',
+                  style: 'destructive',
+                  onPress: () => {
+                    void onReject(request.id).then(() => {
+                      Alert.alert('Declined', `Re-attempt request declined for ${request.studentName}.`);
+                    }).catch((error) => {
+                      Alert.alert('Action failed', error instanceof Error ? error.message : 'Unable to reject request.');
+                    });
+                  },
+                },
+              ])
+            }>
+            <XCircle size={15} color="#EF4444" />
+            <Text style={[styles.deleteButtonText, { color: '#EF4444' }]}>Decline</Text>
+          </AnimatedPressable>
+        ) : null}
+
+        <DeleteButton
+          label="Delete"
+          onPress={() =>
+            Alert.alert('Delete record?', 'This re-attempt request record will be removed permanently.', [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Delete',
+                style: 'destructive',
+                onPress: () => {
+                  void onDelete(request.id).catch((error) => {
+                    Alert.alert('Delete failed', error instanceof Error ? error.message : 'Unable to delete this record.');
+                  });
+                },
+              },
+            ])
+          }
+        />
+      </View>
     </Card>
   );
 });
