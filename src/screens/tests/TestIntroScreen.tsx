@@ -272,15 +272,22 @@ export function TestIntroScreen({ route, navigation }: RootStackScreenProps<'Tes
 
       {showNameModal ? (
         <Card style={styles.formCard}>
-          <Text style={styles.sectionTitle}>Enter Your Name</Text>
+          <Text style={styles.sectionTitle}>Student Details</Text>
+          <Text style={styles.helperText}>Please enter or verify your full name before starting the exam.</Text>
           <InputField
-            label="Enter your full name"
+            label="Full Name *"
             value={promptName}
             onChangeText={setPromptName}
             placeholder="Enter your full name"
+            autoFocus
           />
           <AnimatedPressable style={styles.startButton} onPress={() => void handleSaveNameAndStart()}>
             <Text style={styles.startText}>Start Exam</Text>
+          </AnimatedPressable>
+          <AnimatedPressable
+            style={[styles.startButton, { backgroundColor: colors.surfaceMuted, marginTop: spacing.xs }]}
+            onPress={() => setShowNameModal(false)}>
+            <Text style={[styles.startText, { color: colors.textMuted }]}>Cancel</Text>
           </AnimatedPressable>
         </Card>
       ) : existingAttempt ? (
@@ -297,13 +304,7 @@ export function TestIntroScreen({ route, navigation }: RootStackScreenProps<'Tes
                 Alert.alert('Paper locked', getTestLockedMessage(test));
                 return;
               }
-              const existingName = (promptName || user?.fullName || useTestSessionStore.getState().studentName || '').trim();
-              if (existingName) {
-                useTestSessionStore.getState().setStudentName(existingName);
-                navigation.navigate('TestAttempt', { testId: test.id, studentName: existingName });
-              } else {
-                setShowNameModal(true);
-              }
+              setShowNameModal(true);
             }}>
             <Text style={[styles.startText, { color: colors.primary }]}>Re-attempt Paper</Text>
           </AnimatedPressable>
@@ -361,13 +362,7 @@ export function TestIntroScreen({ route, navigation }: RootStackScreenProps<'Tes
               Alert.alert('Paper locked', getTestLockedMessage(test));
               return;
             }
-            const existingName = (promptName || user?.fullName || useTestSessionStore.getState().studentName || '').trim();
-            if (existingName) {
-              useTestSessionStore.getState().setStudentName(existingName);
-              navigation.navigate('TestAttempt', { testId: test.id, studentName: existingName });
-            } else {
-              setShowNameModal(true);
-            }
+            setShowNameModal(true);
           }}>
           <Text style={styles.startText}>Enter Paper</Text>
         </AnimatedPressable>
