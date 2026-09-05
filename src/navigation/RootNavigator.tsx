@@ -171,7 +171,7 @@ export function RootNavigator() {
 
   const showPendingApproval = user?.role === 'admin' && user.approvalStatus !== 'approved';
 
-  if (!isInitialized || (user && isBootstrapping)) {
+  if (!isInitialized) {
     return <AnimatedSplashScreen />;
   }
 
