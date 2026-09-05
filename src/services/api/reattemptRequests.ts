@@ -155,7 +155,7 @@ export async function fetchReattemptStatusForTest(
       }
     );
 
-    if (rows && rows.length > 0) {
+    if (rows && rows.length > 0 && rows[0]) {
       const mapped = mapReattemptRow(rows[0]);
       // Update local cache
       const updated = [mapped, ...localList.filter((r) => r.id !== mapped.id)];
