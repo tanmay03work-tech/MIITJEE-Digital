@@ -34,6 +34,7 @@ import { getPdfNativeTestById } from '../../services/pdf-native/pdfNativeTestSer
 import { mapPdfNativeTestToCbtTestItem, fetchPdfNativeCbtQuestions } from '../../services/pdf-native/pdfNativeCbtAdapter';
 import { PdfNativeQuestion } from '../../services/pdf-native/pdfNativeTypes';
 import { PdfNativePreview } from '../admin/PdfNativeTestBuilder/PdfNativePreview';
+import { NAVIGATOR_BATCH_TEST_ID, NAVIGATOR_BATCH_TEST_ITEM } from '../../services/api/navigatorBatchTestData';
 
 const MAX_WARNINGS = 3;
 const AUTO_SUBMIT_THRESHOLD = 4;
@@ -111,7 +112,11 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
   const loadQuestions = useAppStore((state) => state.loadQuestions);
   const submitAttempt = useAppStore((state) => state.submitAttempt);
   const isSubmitting = useAppStore((state) => state.isSubmitting);
-  const test = useAppStore((state) => state.tests.find((candidate) => candidate.id === testId));
+  const testFromStore =
+    useAppStore((state) => state.tests.find((candidate) => candidate.id === testId)) ??
+    (testId === NAVIGATOR_BATCH_TEST_ID ? NAVIGATOR_BATCH_TEST_ITEM : undefined);
+  const [resolvedTest, setResolvedTest] = useState<TestItem | undefined>(testFromStore);
+  const test = testFromStore || resolvedTest;
 
   const questions = useTestSessionStore((s) => s.questions);
   const answers = useTestSessionStore((s) => s.answers);
@@ -208,6 +213,10 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
         return;
       }
 
+      if (isMounted) {
+        setResolvedTest(activeTest);
+      }
+
       const testEligibility = getEligibility(user, activeTest);
       if (!testEligibility?.allowed) {
         if (isMounted) {
@@ -219,16 +228,16 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
       try {
         setSessionError(undefined);
         setIsSessionReady(false);
-        autoSubmittedRef.current = false;
-        submitInFlightRef.current = false;
-
-        const existingAttempt = await fetchExistingAttemptForTest(activeTest.id, user?.id);
-        if (existingAttempt) {
-          navigation.replace('TestResult', {
-            testId: activeTest.id,
-            resultId: existingAttempt.id,
-          });
-          return;
+        const isRetake = Boolean(route.params?.studentName);
+        if (!isRetake) {
+          const existingAttempt = await fetchExistingAttemptForTest(activeTest.id, user?.id);
+          if (existingAttempt) {
+            navigation.replace('TestResult', {
+              testId: activeTest.id,
+              resultId: existingAttempt.id,
+            });
+            return;
+          }
         }
 
         let fetchedQuestions = await loadQuestions(activeTest.id);
@@ -868,12 +877,15 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
               <View style={styles.optionList}>
                 {currentQuestion.options.map((option: string, optionIndex: number) => {
                   const badgeLetter = String.fromCharCode(65 + optionIndex);
-                  const isOptionSelected =
-                    selectedAnswer === option ||
-                    selectedAnswer === badgeLetter ||
-                    selectedAnswer === `Option ${badgeLetter}` ||
-                    (typeof selectedAnswer === 'string' &&
-                      selectedAnswer.trim().toLowerCase() === option.trim().toLowerCase());
+                  const normSelected = (selectedAnswer || '').trim().replace(/^Option\s+/i, '');
+                  const isSingleLetter = /^[A-D]$/i.test(normSelected);
+
+                  const isOptionSelected = isSingleLetter
+                    ? normSelected.toUpperCase() === badgeLetter
+                    : Boolean(normSelected) &&
+                      (normSelected.toLowerCase() === option.trim().toLowerCase() ||
+                        normSelected.toUpperCase() === badgeLetter);
+
                   return (
                     <OptionCard
                       key={`${currentQuestion.id}_${optionIndex}`}
@@ -884,7 +896,7 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
                         if (isOptionSelected) {
                           handleClearResponse();
                         } else {
-                          handleSelectAnswer(option);
+                          handleSelectAnswer(badgeLetter);
                         }
                       }}
                       imageUrl={currentQuestion.optionImageUrls?.[optionIndex]}

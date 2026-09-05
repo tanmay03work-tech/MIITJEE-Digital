@@ -25,10 +25,13 @@ function NativeOptionListComponent({
     <View style={styles.container}>
       <View style={styles.list}>
         {options.map((opt) => {
-          const isSelected =
-            selectedAnswer === opt.label ||
-            selectedAnswer === `Option ${opt.label}` ||
-            selectedAnswer === opt.text;
+          const normSelected = (selectedAnswer || '').trim().replace(/^Option\s+/i, '');
+          const isSingleLetter = /^[A-D]$/i.test(normSelected);
+          const isSelected = isSingleLetter
+            ? normSelected.toUpperCase() === opt.label.toUpperCase()
+            : Boolean(normSelected) &&
+              (normSelected.toLowerCase() === (opt.text || '').trim().toLowerCase() ||
+                normSelected.toUpperCase() === opt.label.toUpperCase());
 
           return (
             <TouchableOpacity

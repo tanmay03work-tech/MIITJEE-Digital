@@ -327,16 +327,22 @@ export async function deleteLocalPdfNativeTest(testId: string): Promise<void> {
  * Get all saved PDF-Native tests from local persistent storage.
  */
 export async function getLocalPdfNativeTests(): Promise<PdfNativeTest[]> {
+  const isOldTest = (t: PdfNativeTest) =>
+    t.id === 'test_pdf_native_live_demo' ||
+    t.id.includes('1163869') ||
+    (t.title || '').toLowerCase().includes('11th_morning_physics') ||
+    (t.title || '').toLowerCase().includes('1163869');
+
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEYS.TESTS);
     if (raw) {
       const parsed = JSON.parse(raw) as PdfNativeTest[];
-      memoryTests = Array.isArray(parsed) ? parsed.filter((t) => t.id !== 'test_pdf_native_live_demo') : [];
+      memoryTests = Array.isArray(parsed) ? parsed.filter((t) => !isOldTest(t)) : [];
     }
   } catch (err) {
     // Use memory cache
   }
-  memoryTests = memoryTests.filter((t) => t.id !== 'test_pdf_native_live_demo');
+  memoryTests = memoryTests.filter((t) => !isOldTest(t));
   return memoryTests;
 }
 

@@ -22,6 +22,10 @@ import { TestItem } from '../../types';
 import { getEligibility } from '../../utils/accessControl';
 import { getTestLockedMessage, isTestActive } from '../../utils/testAvailability';
 
+import { NAVIGATOR_BATCH_TEST_ID, NAVIGATOR_BATCH_TEST_ITEM } from '../../services/api/navigatorBatchTestData';
+import { useFocusEffect } from '@react-navigation/native';
+import { RefreshControl } from 'react-native';
+
 type Filter = 'all' | 'eligible' | 'weekly' | 'scholarship';
 type RootNavigation = NativeStackNavigationProp<RootStackParamList>;
 
@@ -39,7 +43,40 @@ export function TestsScreen() {
   const batches = useAppStore((state) => state.batches);
   const results = useAppStore((state) => state.results);
   const isBootstrapping = useAppStore((state) => state.isBootstrapping);
+  const bootstrap = useAppStore((state) => state.bootstrap);
   const [activeFilter, setActiveFilter] = useState<Filter>('all');
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      void bootstrap(user);
+    }, [bootstrap, user])
+  );
+
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      await bootstrap(user);
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [bootstrap, user]);
+
+  const cleanTests = useMemo(() => {
+    const isOldTest = (t: TestItem) =>
+      t.id.includes('1163869') ||
+      (t.title || '').toLowerCase().includes('11th_morning_physics') ||
+      (t.title || '').toLowerCase().includes('1163869');
+
+    let list = tests.filter((t) => !isOldTest(t));
+    const hasNavigator = list.some(
+      (t) => t.id === NAVIGATOR_BATCH_TEST_ID || (t.title || '').toLowerCase().includes('navigator batch')
+    );
+    if (!hasNavigator) {
+      list = [NAVIGATOR_BATCH_TEST_ITEM, ...list];
+    }
+    return list;
+  }, [tests]);
 
   const completedCount = useMemo(
     () => results.filter((result) => result.userId === user?.id).length,
@@ -47,7 +84,7 @@ export function TestsScreen() {
   );
 
   const filteredTests = useMemo(() => {
-    return tests.filter((test) => {
+    return cleanTests.filter((test) => {
       const eligibility = getEligibility(user, test);
 
       if (activeFilter === 'eligible') {
@@ -62,7 +99,7 @@ export function TestsScreen() {
 
       return true;
     });
-  }, [activeFilter, tests, user]);
+  }, [activeFilter, cleanTests, user]);
 
   const handleFilterPress = useCallback((filter: Filter) => {
     setActiveFilter(filter);
@@ -187,6 +224,7 @@ export function TestsScreen() {
           )
         }
         contentContainerStyle={styles.listContent}
+        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} />}
         showsVerticalScrollIndicator={false}
         initialNumToRender={4}
         windowSize={5}

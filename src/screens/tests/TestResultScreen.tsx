@@ -17,6 +17,8 @@ import { colors, radius, spacing } from '../../theme';
 import { LeaderboardEntry, TestResult } from '../../types';
 import { formatDateTimeLabel } from '../../utils/formatters';
 
+import { NAVIGATOR_BATCH_TEST_ID, NAVIGATOR_BATCH_TEST_ITEM } from '../../services/api/navigatorBatchTestData';
+
 const EMPTY_LEADERBOARD: LeaderboardEntry[] = [];
 
 interface SubjectScoreItem {
@@ -41,7 +43,9 @@ export function TestResultScreen({ route, navigation }: RootStackScreenProps<'Te
   const storedLeaderboard = useAppStore((state) => state.testLeaderboards[testId]);
   const loadLeaderboard = useAppStore((state) => state.loadLeaderboard);
   const loadQuestions = useAppStore((state) => state.loadQuestions);
-  const test = useAppStore((state) => state.tests.find((candidate) => candidate.id === testId));
+  const test =
+    useAppStore((state) => state.tests.find((candidate) => candidate.id === testId)) ??
+    (testId === NAVIGATOR_BATCH_TEST_ID ? NAVIGATOR_BATCH_TEST_ITEM : undefined);
   const [leaderboardError, setLeaderboardError] = useState<string>();
   const [isLeaderboardLoading, setIsLeaderboardLoading] = useState(false);
   const leaderboard = storedLeaderboard ?? EMPTY_LEADERBOARD;
@@ -245,6 +249,17 @@ export function TestResultScreen({ route, navigation }: RootStackScreenProps<'Te
     return (
       <Screen contentContainerStyle={styles.content}>
         <AppHeader title="Result" subtitle="Result not found" />
+        <Card style={styles.candidateCard}>
+          <Text style={styles.candidateName}>Scorecard Not Found</Text>
+          <Text style={styles.candidateTestTitle}>
+            No completed attempt record was found for this paper. If you recently finished an exam, please return to the tests center.
+          </Text>
+          <View style={{ marginTop: spacing.md, flexDirection: 'row', gap: spacing.sm }}>
+            <Button variant="primary" onPress={() => navigation.navigate('MainTabs', { screen: 'Tests' })}>
+              Back to Tests
+            </Button>
+          </View>
+        </Card>
       </Screen>
     );
   }

@@ -117,7 +117,12 @@ export async function fetchReadyPdfNativeTests(): Promise<TestItem[]> {
   try {
     const allTests = await listPdfNativeTests();
     const readyTests = allTests.filter(
-      (t) => (t.status === 'READY' || t.status === 'LIVE') && t.id !== 'test_pdf_native_live_demo'
+      (t) =>
+        (t.status === 'READY' || t.status === 'LIVE') &&
+        t.id !== 'test_pdf_native_live_demo' &&
+        !t.id.includes('1163869') &&
+        !(t.title || '').toLowerCase().includes('11th_morning_physics') &&
+        !(t.title || '').toLowerCase().includes('1163869')
     );
     return readyTests.map(mapPdfNativeTestToCbtTestItem);
   } catch (err) {

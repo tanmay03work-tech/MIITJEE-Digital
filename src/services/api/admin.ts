@@ -38,6 +38,7 @@ import {
   getLocalPdfNativeAttempts,
   getLocalPdfNativeTestQuestions,
 } from '../pdf-native/pdfNativeLocalStorage';
+import { getAllLocalStandardAttempts } from './tests';
 
 const DEFAULT_PAGE_SIZE = 20;
 const PAGE_CACHE_TTL_MS = 45_000;
@@ -357,6 +358,22 @@ export async function fetchResultsPage(userId?: string, options?: PageOptions): 
     } catch {
       // Ignore
     }
+  }
+
+  // Merge local standard attempts (Navigator batch test etc.)
+  try {
+    const stdAttempts = await getAllLocalStandardAttempts();
+    const filteredStd = userId
+      ? stdAttempts.filter((a) => a.userId === userId || a.userId === 'guest_user')
+      : stdAttempts;
+
+    for (const a of filteredStd) {
+      if (!mappedRows.some((r) => r.id === a.id)) {
+        mappedRows.push(a);
+      }
+    }
+  } catch {
+    // Ignore
   }
 
   setCachedRows(cacheKey, mappedRows);

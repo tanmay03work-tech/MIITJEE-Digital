@@ -28,3 +28,5 @@ tmp-native/
 .android-codex/
 toolchains/
 .vercel
+
+.vercel

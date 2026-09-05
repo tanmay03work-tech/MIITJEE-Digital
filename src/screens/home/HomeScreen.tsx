@@ -22,6 +22,7 @@ import { useAuthStore } from '../../store/authStore';
 import { spacing } from '../../theme';
 import { QuickAction, TestItem } from '../../types';
 import { isTestActive } from '../../utils/testAvailability';
+import { NAVIGATOR_BATCH_TEST_ID, NAVIGATOR_BATCH_TEST_ITEM } from '../../services/api/navigatorBatchTestData';
 
 type RootNavigation = NativeStackNavigationProp<RootStackParamList>;
 type HomeFeedSectionType = 'header' | 'continue_learning' | 'recommended_tests' | 'recent_results' | 'leaderboard_preview';
@@ -115,8 +116,25 @@ export function HomeScreen({ navigation }: MainTabScreenProps<'Home'>) {
 
   const userResults = useMemo(() => results.filter((result) => result.userId === user?.id), [results, user?.id]);
   const latestResults = useMemo(() => userResults.slice(0, 3), [userResults]);
-  const testsById = useMemo(() => Object.fromEntries(tests.map((test) => [test.id, test])), [tests]);
-  const upcomingTests = useMemo(() => tests.filter((test) => !isTestActive(test)).slice(0, 3), [tests]);
+
+  const cleanTests = useMemo(() => {
+    const isOldTest = (t: TestItem) =>
+      t.id.includes('1163869') ||
+      (t.title || '').toLowerCase().includes('11th_morning_physics') ||
+      (t.title || '').toLowerCase().includes('1163869');
+
+    let list = tests.filter((t) => !isOldTest(t));
+    const hasNavigator = list.some(
+      (t) => t.id === NAVIGATOR_BATCH_TEST_ID || (t.title || '').toLowerCase().includes('navigator batch')
+    );
+    if (!hasNavigator) {
+      list = [NAVIGATOR_BATCH_TEST_ITEM, ...list];
+    }
+    return list;
+  }, [tests]);
+
+  const testsById = useMemo(() => Object.fromEntries(cleanTests.map((test) => [test.id, test])), [cleanTests]);
+  const upcomingTests = useMemo(() => cleanTests.slice(0, 3), [cleanTests]);
   const nextTest = upcomingTests[0];
 
   const computedAverageScore = useMemo(
@@ -194,15 +212,9 @@ export function HomeScreen({ navigation }: MainTabScreenProps<'Home'>) {
 
   const handleTestOpen = useCallback(
     (test: TestItem) => {
-      const existingAttempt = results.find((entry) => entry.userId === user?.id && entry.testId === test.id);
-      if (existingAttempt) {
-        rootNavigation.navigate('TestResult', { testId: test.id, resultId: existingAttempt.id });
-        return;
-      }
-
       rootNavigation.navigate('TestIntro', { testId: test.id });
     },
-    [results, rootNavigation, user?.id],
+    [rootNavigation],
   );
 
   const renderSection = useCallback<ListRenderItem<HomeFeedSectionItem>>(

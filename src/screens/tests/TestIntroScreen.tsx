@@ -27,9 +27,13 @@ import { updateRows } from '../../services/supabase/client';
 import { getTestLockedMessage, getTestStatusLabel, isTestActive } from '../../utils/testAvailability';
 import { fetchExistingAttemptForTest } from '../../services/api/tests';
 
+import { NAVIGATOR_BATCH_TEST_ID, NAVIGATOR_BATCH_TEST_ITEM } from '../../services/api/navigatorBatchTestData';
+
 export function TestIntroScreen({ route, navigation }: RootStackScreenProps<'TestIntro'>) {
   const { testId } = route.params;
-  const test = useAppStore((state) => state.tests.find((candidate) => candidate.id === testId));
+  const test =
+    useAppStore((state) => state.tests.find((candidate) => candidate.id === testId)) ??
+    (testId === NAVIGATOR_BATCH_TEST_ID ? NAVIGATOR_BATCH_TEST_ITEM : undefined);
   const user = useAuthStore((state) => state.user);
   const questionCache = useAppStore((state) => state.questionCache);
   const tests = useAppStore((state) => state.tests);
@@ -266,12 +270,44 @@ export function TestIntroScreen({ route, navigation }: RootStackScreenProps<'Tes
         ) : null}
       </Card>
 
-      {existingAttempt ? (
-        <AnimatedPressable
-          style={styles.startButton}
-          onPress={() => navigation.navigate('TestResult', { testId: test.id, resultId: existingAttempt.id })}>
-          <Text style={styles.startText}>View Result</Text>
-        </AnimatedPressable>
+      {showNameModal ? (
+        <Card style={styles.formCard}>
+          <Text style={styles.sectionTitle}>Enter Your Name</Text>
+          <InputField
+            label="Enter your full name"
+            value={promptName}
+            onChangeText={setPromptName}
+            placeholder="Enter your full name"
+          />
+          <AnimatedPressable style={styles.startButton} onPress={() => void handleSaveNameAndStart()}>
+            <Text style={styles.startText}>Start Exam</Text>
+          </AnimatedPressable>
+        </Card>
+      ) : existingAttempt ? (
+        <View style={{ gap: spacing.md }}>
+          <AnimatedPressable
+            style={styles.startButton}
+            onPress={() => navigation.navigate('TestResult', { testId: test.id, resultId: existingAttempt.id })}>
+            <Text style={styles.startText}>View Result</Text>
+          </AnimatedPressable>
+          <AnimatedPressable
+            style={[styles.startButton, { backgroundColor: colors.surface, borderColor: colors.primary, borderWidth: 1 }]}
+            onPress={() => {
+              if (!testActive && user?.role !== 'admin') {
+                Alert.alert('Paper locked', getTestLockedMessage(test));
+                return;
+              }
+              const existingName = (promptName || user?.fullName || useTestSessionStore.getState().studentName || '').trim();
+              if (existingName) {
+                useTestSessionStore.getState().setStudentName(existingName);
+                navigation.navigate('TestAttempt', { testId: test.id, studentName: existingName });
+              } else {
+                setShowNameModal(true);
+              }
+            }}>
+            <Text style={[styles.startText, { color: colors.primary }]}>Re-attempt Paper</Text>
+          </AnimatedPressable>
+        </View>
       ) : test.type === 'scholarship' ? (
         <Card style={styles.formCard}>
           <Text style={styles.sectionTitle}>Scholarship Details</Text>
@@ -317,19 +353,6 @@ export function TestIntroScreen({ route, navigation }: RootStackScreenProps<'Tes
             <Text style={styles.startText}>Continue to Scholarship Test</Text>
           </AnimatedPressable>
         </Card>
-      ) : showNameModal ? (
-        <Card style={styles.formCard}>
-          <Text style={styles.sectionTitle}>Enter Your Name</Text>
-          <InputField
-            label="Enter your full name"
-            value={promptName}
-            onChangeText={setPromptName}
-            placeholder="Enter your full name"
-          />
-          <AnimatedPressable style={styles.startButton} onPress={() => void handleSaveNameAndStart()}>
-            <Text style={styles.startText}>Start Exam</Text>
-          </AnimatedPressable>
-        </Card>
       ) : eligibility.allowed ? (
         <AnimatedPressable
           style={styles.startButton}
@@ -338,7 +361,13 @@ export function TestIntroScreen({ route, navigation }: RootStackScreenProps<'Tes
               Alert.alert('Paper locked', getTestLockedMessage(test));
               return;
             }
-            setShowNameModal(true);
+            const existingName = (promptName || user?.fullName || useTestSessionStore.getState().studentName || '').trim();
+            if (existingName) {
+              useTestSessionStore.getState().setStudentName(existingName);
+              navigation.navigate('TestAttempt', { testId: test.id, studentName: existingName });
+            } else {
+              setShowNameModal(true);
+            }
           }}>
           <Text style={styles.startText}>Enter Paper</Text>
         </AnimatedPressable>

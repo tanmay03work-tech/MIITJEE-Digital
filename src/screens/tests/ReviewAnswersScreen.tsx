@@ -11,11 +11,14 @@ import { QuestionBodyRenderer } from '../../components/tests/QuestionBodyRendere
 import { useAppStore } from '../../store/appStore';
 import { colors, radius, spacing } from '../../theme';
 import { RootStackScreenProps } from '../../navigation/types';
+import { NAVIGATOR_BATCH_TEST_ID, NAVIGATOR_BATCH_TEST_ITEM } from '../../services/api/navigatorBatchTestData';
 
 export function ReviewAnswersScreen({ route }: RootStackScreenProps<'ReviewAnswers'>) {
   const { resultId, testId } = route.params;
   const loadReview = useAppStore((state) => state.loadReview);
-  const test = useAppStore((state) => state.tests.find((item) => item.id === testId));
+  const test =
+    useAppStore((state) => state.tests.find((item) => item.id === testId)) ??
+    (testId === NAVIGATOR_BATCH_TEST_ID ? NAVIGATOR_BATCH_TEST_ITEM : undefined);
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [review, setReview] = useState<Awaited<ReturnType<typeof loadReview>>>([]);
@@ -80,8 +83,22 @@ export function ReviewAnswersScreen({ route }: RootStackScreenProps<'ReviewAnswe
               {item.questionType === 'mcq' ? (
                 <View style={styles.optionList}>
                   {item.options.map((option, optionIndex) => {
-                    const isUser = !isUnatt && item.userAnswer === option;
-                    const isCorrect = item.correctAnswer === option;
+                    const badgeLetter = String.fromCharCode(65 + optionIndex);
+                    const normUser = (item.userAnswer || '').trim().replace(/^Option\s+/i, '');
+                    const normCorrect = (item.correctAnswer || '').trim().replace(/^Option\s+/i, '');
+
+                    const isUser =
+                      !isUnatt &&
+                      (/^[A-D]$/i.test(normUser)
+                        ? normUser.toUpperCase() === badgeLetter
+                        : normUser.toLowerCase() === option.trim().toLowerCase() ||
+                          normUser.toUpperCase() === badgeLetter);
+
+                    const isCorrect = /^[A-D]$/i.test(normCorrect)
+                      ? normCorrect.toUpperCase() === badgeLetter
+                      : normCorrect.toLowerCase() === option.trim().toLowerCase() ||
+                        normCorrect.toUpperCase() === badgeLetter;
+
                     return (
                       <View
                         key={`${item.questionId}_${optionIndex}`}
