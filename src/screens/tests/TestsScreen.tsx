@@ -22,9 +22,14 @@ import { TestItem } from '../../types';
 import { getEligibility } from '../../utils/accessControl';
 import { getTestLockedMessage, isTestActive } from '../../utils/testAvailability';
 
-import { NAVIGATOR_BATCH_TEST_ID, NAVIGATOR_BATCH_TEST_ITEM } from '../../services/api/navigatorBatchTestData';
 import { useFocusEffect } from '@react-navigation/native';
 import { RefreshControl } from 'react-native';
+
+import {
+  BOOSTER_BATCH_TEST_ITEM,
+  isGrandTest,
+  NAVIGATOR_BATCH_TEST_ITEM,
+} from '../../services/api/publishedGrandTests';
 
 type Filter = 'all' | 'eligible' | 'weekly' | 'scholarship';
 type RootNavigation = NativeStackNavigationProp<RootStackParamList>;
@@ -66,16 +71,10 @@ export function TestsScreen() {
     const isOldTest = (t: TestItem) =>
       t.id.includes('1163869') ||
       (t.title || '').toLowerCase().includes('11th_morning_physics') ||
-      (t.title || '').toLowerCase().includes('1163869');
+      (t.title || '').toLowerCase().includes('1163869') ||
+      isGrandTest(t.id, t.title);
 
-    let list = tests.filter((t) => !isOldTest(t));
-    const hasNavigator = list.some(
-      (t) => t.id === NAVIGATOR_BATCH_TEST_ID || (t.title || '').toLowerCase().includes('navigator batch')
-    );
-    if (!hasNavigator) {
-      list = [NAVIGATOR_BATCH_TEST_ITEM, ...list];
-    }
-    return list;
+    return tests.filter((t) => !isOldTest(t) && Boolean(t.id));
   }, [tests]);
 
   const completedCount = useMemo(

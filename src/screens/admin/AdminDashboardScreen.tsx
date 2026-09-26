@@ -88,15 +88,12 @@ export function AdminDashboardScreen({ navigation }: RootStackScreenProps<'Admin
       if (item.type === 'actions') {
         return (
           <View style={styles.actions}>
-            <AdminActionCard title="Test Management" description="Drafts, live tests, subject sections, and CBT publishing workflow." icon={ListChecks} color={colors.primary} onPress={() => navigation.navigate('PdfNativeTestManagement')} />
-            <AdminActionCard title="PDF Question Sets" description="Question bank sets, ordered question packages, and test creation from sets." icon={FolderOpen} color="#2563EB" onPress={() => navigation.navigate('PdfNativeSetManagement')} />
-            <AdminActionCard title="PDF-Native Builder" description="Detect question regions directly from original PDF with 100% fidelity." icon={FileText} color={colors.primaryDeep || colors.primary} onPress={() => navigation.navigate('PdfNativeTestBuilder')} />
-            <AdminActionCard title="Create Test" description="Build weekly or scholarship papers with structured questions." icon={FilePlus2} color="#15803D" onPress={() => navigation.navigate('CreateTest')} />
-            <AdminActionCard title="Question Bank" description="Upload PDF sets once, review them, and reuse questions across multiple papers." icon={FolderOpen} color={colors.info} onPress={() => navigation.navigate('QuestionBank', { mode: 'manage' })} />
-            <AdminActionCard title="Create Batch" description="Add a new batch with image, description, and class details." icon={Layers3} color={colors.warning} onPress={() => navigation.navigate('CreateBatch')} />
+            <AdminActionCard title="Question Bank (.docx)" description="Upload Word (.docx) papers, extract questions & diagrams into Question Sets." icon={FolderOpen} color={colors.primary} onPress={() => navigation.navigate('QuestionBank', { mode: 'manage' })} />
+            <AdminActionCard title="Create Test" description="Build weekly or scholarship papers from Question Sets or scratch." icon={FilePlus2} color="#15803D" onPress={() => navigation.navigate('CreateTest')} />
+            <AdminActionCard title="Manage Tests" description="Edit timing, schedule, lock state, and batch access of every paper." icon={ListChecks} color={colors.accent} onPress={() => navigation.navigate('ManageTests')} />
+            <AdminActionCard title="Test Results" description="Review student submissions, subject-wise breakdowns, and export to CSV/Excel." icon={BarChart3} color="#2563EB" onPress={() => navigation.navigate('ViewResults')} />
             <AdminActionCard title="Manage Users" description="Assign roles, batch access, and student permissions in one place." icon={UsersRound} color={colors.info} onPress={() => navigation.navigate('ManageUsers')} />
-            <AdminActionCard title="Manage Tests" description="Edit timing, lock state, and availability of every paper." icon={ListChecks} color={colors.accent} onPress={() => navigation.navigate('ManageTests')} />
-            <AdminActionCard title="Test Results" description="Review student submissions and delete attempts when needed." icon={BarChart3} color={colors.accent} onPress={() => navigation.navigate('ViewResults')} />
+            <AdminActionCard title="Create Batch" description="Add a new batch with image, description, and class details." icon={Layers3} color={colors.warning} onPress={() => navigation.navigate('CreateBatch')} />
             <AdminActionCard
               title="Wipe Leaderboard"
               description="Clear leaderboard and attempt history when you need a fresh restart."

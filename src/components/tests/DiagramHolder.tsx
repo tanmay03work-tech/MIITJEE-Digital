@@ -144,16 +144,18 @@ const styles = StyleSheet.create({
   },
   imageHolder: {
     width: '100%',
-    minHeight: 140,
-    maxHeight: 260,
     padding: spacing.md,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#FFFFFF',
+    minHeight: 120,
   },
   image: {
     width: '100%',
-    height: 180,
+    maxWidth: '100%',
+    maxHeight: 240,
+    height: 160,
+    alignSelf: 'center',
   },
   captionText: {
     color: colors.textMuted,

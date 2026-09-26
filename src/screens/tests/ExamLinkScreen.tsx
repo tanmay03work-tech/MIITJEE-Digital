@@ -13,6 +13,7 @@ import { resolveExamLink } from '../../services/api/tests';
 import { useAuthStore } from '../../store/authStore';
 import { colors, radius, spacing } from '../../theme';
 import { ExamLinkResolution, TestItem } from '../../types';
+import { isGrandTest } from '../../services/api/publishedGrandTests';
 
 export function ExamLinkScreen({ route, navigation }: RootStackScreenProps<'ExamLink'>) {
   const shareCode = route?.params?.shareCode || '';
@@ -62,8 +63,11 @@ export function ExamLinkScreen({ route, navigation }: RootStackScreenProps<'Exam
     );
   }
 
-  // Requirement: Authentication Required
-  if (!user) {
+  const test: TestItem | undefined = resolution?.test;
+  const isOpenExam = test?.isOpenForAll || isGrandTest(test?.id, test?.title);
+
+  // Requirement: Authentication Required for batch-restricted tests only
+  if (!user && !isOpenExam) {
     return (
       <Screen contentContainerStyle={styles.container}>
         <AppHeader title="Exam Access Required" subtitle="Sign in to your account to open this paper" />
@@ -161,8 +165,6 @@ export function ExamLinkScreen({ route, navigation }: RootStackScreenProps<'Exam
       </Screen>
     );
   }
-
-  const test: TestItem | undefined = resolution.test;
 
   return (
     <Screen contentContainerStyle={styles.container}>

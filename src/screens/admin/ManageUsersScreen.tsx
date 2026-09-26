@@ -117,9 +117,12 @@ export function ManageUsersScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
 
+  const usersRef = React.useRef<AppUser[]>([]);
+  usersRef.current = users;
+
   const loadUsersPage = useCallback(
     async (reset: boolean, searchValue: string) => {
-      const offset = reset ? 0 : users.length;
+      const offset = reset ? 0 : usersRef.current.length;
       const loader = reset ? setLoadingInitial : setLoadingMore;
       loader(true);
       try {
@@ -128,7 +131,11 @@ export function ManageUsersScreen() {
           limit: PAGE_SIZE,
           search: searchValue,
         });
-        setUsers((current) => (reset ? rows : [...current, ...rows]));
+        setUsers((current) => {
+          const next = reset ? rows : [...current, ...rows];
+          usersRef.current = next;
+          return next;
+        });
         setHasMore(rows.length === PAGE_SIZE);
       } catch (error) {
         Alert.alert('Unable to load users', error instanceof Error ? error.message : 'Please try again.');
@@ -136,7 +143,7 @@ export function ManageUsersScreen() {
         loader(false);
       }
     },
-    [users.length],
+    [],
   );
 
   useFocusEffect(

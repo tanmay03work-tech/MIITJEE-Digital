@@ -43,9 +43,12 @@ export function ViewResultsScreen() {
   const [hasMore, setHasMore] = useState(true);
   const deferredSearchTerm = useDeferredValue(searchTerm);
 
+  const resultsRef = React.useRef<TestResult[]>([]);
+  resultsRef.current = results;
+
   const loadResultsPage = useCallback(
     async (reset: boolean, searchValue: string) => {
-      const offset = reset ? 0 : results.length;
+      const offset = reset ? 0 : resultsRef.current.length;
       const loader = reset ? setLoadingInitial : setLoadingMore;
       loader(true);
       try {
@@ -54,7 +57,11 @@ export function ViewResultsScreen() {
           limit: PAGE_SIZE,
           search: searchValue,
         });
-        setResults((current) => (reset ? rows : [...current, ...rows]));
+        setResults((current) => {
+          const next = reset ? rows : [...current, ...rows];
+          resultsRef.current = next;
+          return next;
+        });
         setHasMore(rows.length === PAGE_SIZE);
       } catch (error) {
         Alert.alert('Unable to load results', error instanceof Error ? error.message : 'Please try again.');
@@ -62,7 +69,7 @@ export function ViewResultsScreen() {
         loader(false);
       }
     },
-    [results.length],
+    [],
   );
 
   useFocusEffect(
@@ -372,6 +379,7 @@ export function ViewResultsScreen() {
         </>
       ) : (
         <FlatList
+          style={{ flex: 1 }}
           data={visibleResults}
           keyExtractor={(item) => item.id}
           renderItem={renderResult}
@@ -432,8 +440,8 @@ export function ViewResultsScreen() {
           }
           ListEmptyComponent={<ResultsEmptyState />}
           ListFooterComponent={loadingMore ? <AdminListSkeleton rows={1} /> : <View style={styles.footerSpace} />}
-          contentContainerStyle={styles.list}
-          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[styles.list, { paddingBottom: spacing.xxxl + 80 }]}
+          showsVerticalScrollIndicator={true}
           initialNumToRender={8}
           maxToRenderPerBatch={8}
           windowSize={5}

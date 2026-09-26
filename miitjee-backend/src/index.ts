@@ -6,7 +6,6 @@ import {
 	auditLogHandler,
 	adminRecoveryHandler,
 } from "./endpoints/cbt";
-import { handlePdfNativeRoutes } from "./pdf-native/routes";
 
 interface Env {
 	SUPABASE_URL: string;
@@ -2775,14 +2774,6 @@ export default {
 				releaseNotes: "Updated web app icon to match Android, fixed question set deletion, and performance improvements.",
 				title: "New Update Available! 🚀"
 			});
-		}
-
-		// PDF-Native Test Builder isolated routes
-		if (path.startsWith("/api/pdf-native")) {
-			const pdfNativeRes = await handlePdfNativeRoutes(request);
-			if (pdfNativeRes) {
-				return pdfNativeRes;
-			}
 		}
 
 		return new Response(JSON.stringify({ error: "Not found" }), { status: 404 });

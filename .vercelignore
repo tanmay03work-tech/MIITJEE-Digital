@@ -23,3 +23,9 @@ dist/**
 dist-electron
 dist-electron/**
 .env
+miitjee-backend
+miitjee-backend/**
+**/node_modules
+**/node_modules/**
+question paper
+question paper/**

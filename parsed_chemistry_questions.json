@@ -1,0 +1,333 @@
+[
+  {
+    "num": 26,
+    "type": "mcq",
+    "prompt": "According to molecular orbital theory, the number of unpaired electron(s) in O2^2- is:",
+    "images": [],
+    "options": [
+      "1",
+      "0",
+      "2",
+      "3"
+    ],
+    "correct": "(B) 0",
+    "raw_lines": []
+  },
+  {
+    "num": 27,
+    "type": "mcq",
+    "prompt": "The correct decreasing order of priority of functional groups in naming an organic compound as per IUPAC system of nomenclature is:",
+    "images": [],
+    "options": [
+      "-COOH > -CONH2 > -COCl > -CHO",
+      "-SO3H > -COCl > -CONH2 > -CN",
+      "-COOR > -COCl > -NH2 > C=O",
+      "-COOH > -COOR > -CONH2 > -COCl"
+    ],
+    "correct": "(B) -SO3H > -COCl > -CONH2 > -CN",
+    "raw_lines": []
+  },
+  {
+    "num": 28,
+    "type": "mcq",
+    "prompt": "Which one of the following compounds shows the presence of intramolecular hydrogen bond?",
+    "images": [],
+    "options": [
+      "H2O2",
+      "HCN",
+      "Cellulose",
+      "Concentrated acetic acid"
+    ],
+    "correct": "(C) Cellulose",
+    "raw_lines": []
+  },
+  {
+    "num": 29,
+    "type": "mcq",
+    "prompt": "The IUPAC name of the following compound is:",
+    "images": [
+      "media/29ed10b03a6b1b97ef408044625adeacd520ef4f.png"
+    ],
+    "options": [
+      "3-ethyl-4-methylhex-4-ene",
+      "4,4-diethyl-3-methylbut-2-ene",
+      "4-methyl-3-ethylhex-4-ene",
+      "4-ethyl-3-methylhex-2-ene"
+    ],
+    "correct": "(D) 4-ethyl-3-methylhex-2-ene",
+    "raw_lines": []
+  },
+  {
+    "num": 30,
+    "type": "mcq",
+    "prompt": "Given below are two statements:\nStatement I: IUPAC name of HO-CH2-(CH2)3-CH2-COCH3 is 7-hydroxyheptan-2-one.\nStatement II: 2-oxoheptan-7-ol is the correct IUPAC name for above compound.\nIn the light of the above statements, choose the most appropriate answer from the options given below:",
+    "images": [],
+    "options": [
+      "Statement I is correct but Statement II is incorrect.",
+      "Both Statement I and II are incorrect.",
+      "Both Statement I and Statement II are correct.",
+      "Statement I is incorrect but Statement II is correct."
+    ],
+    "correct": "(A) Statement I is correct but Statement II is incorrect.",
+    "raw_lines": []
+  },
+  {
+    "num": 31,
+    "type": "mcq",
+    "prompt": "Given below are two statements:\nStatement (I): For ClF3, all three possible structures may be drawn as follows:\nStatement (II): Structure III is most stable, as the orbitals having the lone pairs are axial, where the lp - bp repulsion is minimum.\nIn the light of the above statements, choose the most appropriate answer given below:",
+    "images": [
+      "media/a307efc95b1a8f36b4478dbf1052fbb46b9992ed.png"
+    ],
+    "options": [
+      "Statement I is incorrect but statement II is correct.",
+      "Statement I is correct but Statement II is incorrect.",
+      "Both Statement I and statement II are correct.",
+      "Both Statement I and statement II are incorrect."
+    ],
+    "correct": "(B) Statement I is correct but Statement II is incorrect.",
+    "raw_lines": []
+  },
+  {
+    "num": 32,
+    "type": "mcq",
+    "prompt": "Consider the molecules CH4, NH3 and H2O. Which of the given statements is false?",
+    "images": [],
+    "options": [
+      "The H-O-H bond angle in H2O is smaller than the H-N-H bond angle in NH3.",
+      "The H-C-H bond angle in CH4 is larger than the H-N-H bond angle in NH3.",
+      "The H-C-H bond angle in CH4, the H-N-H bond angle in NH3, and the H-O-H bond angle in H2O are all greater than 90°.",
+      "The H-O-H bond angle in H2O is larger than the H-C-H bond angle in CH4."
+    ],
+    "correct": "(D) The H-O-H bond angle in H2O is larger than the H-C-H bond angle in CH4.",
+    "raw_lines": []
+  },
+  {
+    "num": 33,
+    "type": "mcq",
+    "prompt": "sp3d2 hybridization is not displayed by",
+    "images": [],
+    "options": [
+      "BrF5",
+      "SF6",
+      "[CrF6]3-",
+      "PF5"
+    ],
+    "correct": "(D) PF5",
+    "raw_lines": []
+  },
+  {
+    "num": 34,
+    "type": "mcq",
+    "prompt": "According to molecular orbital theory, which of the following is true with respect to Li2+ and Li2-?",
+    "images": [],
+    "options": [
+      "Li2+ is unstable and Li2- is stable",
+      "Li2+ is stable and Li2- is unstable",
+      "Both are stable",
+      "Both are unstable"
+    ],
+    "correct": "(C) Both are stable",
+    "raw_lines": []
+  },
+  {
+    "num": 35,
+    "type": "mcq",
+    "prompt": "Match List-I with List-II:\nList-I (Molecule)\nList-II (Shape)\nA. BrF5\nI. T-shape\nB. H2O\nII. See-saw\nC. ClF3\nIII. Bent\nD. SF4\nIV. Square pyramidal\nChoose the correct answer:",
+    "images": [],
+    "options": [
+      "A – I, B – II, C – IV, D – III",
+      "A – II, B – I, C – III, D – IV",
+      "A – III, B – IV, C – II, D – I",
+      "A – IV, B – III, C – I, D – II"
+    ],
+    "correct": "(D) A – IV, B – III, C – I, D – II",
+    "raw_lines": []
+  },
+  {
+    "num": 36,
+    "type": "mcq",
+    "prompt": "The structure of 4-Methylpent-2-enal is:",
+    "images": [],
+    "options": [
+      "H2C=C(H)-CH(CH3)-CH2-CHO",
+      "CH3-CH2-C(CH3)=CH-CHO",
+      "CH3-CH2-C(CH3)=C(CH3)-CHO",
+      "CH3-CH(CH3)-CH=CH-CHO"
+    ],
+    "correct": "(D) CH3-CH(CH3)-CH=CH-CHO",
+    "raw_lines": []
+  },
+  {
+    "num": 37,
+    "type": "mcq",
+    "prompt": "Match List-I with List-II.\nList-I (Molecule)\nList-II (Hybridization, Shape)\nA. XeO3\nI. sp3; pyramidal\nB. XeF2\nII. sp3d; linear\nC. XeOF4\nIII. sp3d2; square pyramidal\nD. XeF6\nIV. sp3d3; distorted octahedral\nChoose the correct answer from the options given below.",
+    "images": [],
+    "options": [
+      "A – I, B – II, C – III, D – IV",
+      "A – II, B – IV, C – III, D – I",
+      "A – IV, B – II, C – III, D – I",
+      "A – IV, B – II, C – I, D – III"
+    ],
+    "correct": "(A) A – I, B – II, C – III, D – IV",
+    "raw_lines": []
+  },
+  {
+    "num": 38,
+    "type": "mcq",
+    "prompt": "The IUPAC name of the following compound is:",
+    "images": [
+      "media/c984d80fcdd391710ffe277ae853362a7d0629dd.png"
+    ],
+    "options": [
+      "3,5-dimethyl-4-propylhept-1-en-6-yne",
+      "3-methyl-4-(1-methylprop-2-ynyl)-1-heptene",
+      "3-methyl-4-(3-methylprop-1-enyl)-1-heptyne",
+      "3,5-dimethyl-4-propylhept-6-en-1-yne"
+    ],
+    "correct": "(A) 3,5-dimethyl-4-propylhept-1-en-6-yne",
+    "raw_lines": []
+  },
+  {
+    "num": 39,
+    "type": "mcq",
+    "prompt": "Which of the following are examples of double salts?\nA. FeSO4·(NH4)2SO4·6H2O\nB. CuSO4·4NH3·H2O\nC. K2SO4·Al2(SO4)3·24H2O\nD. Fe(CN)2·4KCN\nChoose the correct answer.",
+    "images": [],
+    "options": [
+      "A and C only",
+      "A and B only",
+      "A, B and D only",
+      "B and D only"
+    ],
+    "correct": "(A) A and C only",
+    "raw_lines": []
+  },
+  {
+    "num": 40,
+    "type": "mcq",
+    "prompt": "1 mol of an octahedral metal complex with formula MCl3·2L on reaction with excess of AgNO3 gives 1 mol of AgCl. The denticity of ligand L is ..... (Integer answer)",
+    "images": [],
+    "options": [
+      "3",
+      "4",
+      "2",
+      "1"
+    ],
+    "correct": "(C) 2",
+    "raw_lines": []
+  },
+  {
+    "num": 41,
+    "type": "mcq",
+    "prompt": "The d-orbital electronic configuration of the complex among [Co(en)3]3+, [CoF6]3-, [Mn(H2O)6]2+ and [Zn(H2O)6]2+ that has the highest CFSE is",
+    "images": [],
+    "options": [
+      "t2g^6 eg^0",
+      "t2g^6 eg^4",
+      "t2g^3 eg^2",
+      "t2g^4 eg^2"
+    ],
+    "correct": "(A) t2g^6 eg^0",
+    "raw_lines": []
+  },
+  {
+    "num": 42,
+    "type": "mcq",
+    "prompt": "If Ni2+ is replaced by Pt2+ in the complex [NiCl2Br2]2-, which of the following properties are expected to change?\nA. Geometry\nB. Geometrical isomerism\nC. Optical isomerism\nD. Magnetic properties",
+    "images": [],
+    "options": [
+      "A, B and C",
+      "A, B and D",
+      "A and D",
+      "B and C"
+    ],
+    "correct": "(B) A, B and D",
+    "raw_lines": []
+  },
+  {
+    "num": 43,
+    "type": "mcq",
+    "prompt": "CrCl3·xNH3 can exist as a complex. A 0.1 m aqueous solution of this complex shows a depression in freezing point of 0.558°C. Assuming 100% ionisation of this complex and that the coordination number of Cr is 6, the complex will be: (Given Kf = 1.86 K kg mol-1)",
+    "images": [],
+    "options": [
+      "[Cr(NH3)6]Cl3",
+      "[Cr(NH3)4Cl2]Cl",
+      "[Cr(NH3)5Cl]Cl2",
+      "[Cr(NH3)3Cl3]"
+    ],
+    "correct": "(C) [Cr(NH3)5Cl]Cl2",
+    "raw_lines": []
+  },
+  {
+    "num": 44,
+    "type": "mcq",
+    "prompt": "A magnetic moment of 1.73 BM will be shown by which of the following?",
+    "images": [],
+    "options": [
+      "TiCl4",
+      "[CoCl6]4-",
+      "[Cu(NH3)4]2+",
+      "[Ni(CN)4]2-"
+    ],
+    "correct": "(C) [Cu(NH3)4]2+",
+    "raw_lines": []
+  },
+  {
+    "num": 45,
+    "type": "mcq",
+    "prompt": "Match List I with List II:\nList I (Complex)\nList II (Type of isomerism)\nA. [Pt(NH3)2Cl2]\nI. Optical\nB. [Co(en)3]3+\nII. Solvate\nC. [Co(NH3)5NO2]Cl2\nIII. Geometrical\nD. [Cr(H2O)6]Cl3\nIV. Linkage\nChoose the correct answer from the options given below:",
+    "images": [],
+    "options": [
+      "A – I, B – III, C – II, D – IV",
+      "A – II, B – IV, C – III, D – I",
+      "A – III, B – I, C – IV, D – II",
+      "A – III, B – I, C – II, D – IV"
+    ],
+    "correct": "(C) A – III, B – I, C – IV, D – II",
+    "raw_lines": []
+  },
+  {
+    "num": 46,
+    "type": "integer",
+    "prompt": "The sum of the number of lone pairs of electrons present on the central atoms of XeO3, XeOF4, and XeF6 is .......",
+    "images": [],
+    "options": [],
+    "correct": "3",
+    "raw_lines": []
+  },
+  {
+    "num": 47,
+    "type": "integer",
+    "prompt": "The total number of σ and π bonds in 2-oxohex-3-ynoic acid is . . . . . . .",
+    "images": [],
+    "options": [],
+    "correct": "18",
+    "raw_lines": []
+  },
+  {
+    "num": 48,
+    "type": "integer",
+    "prompt": "The Born-Haber cycle for KCl is evaluated with the following data:\nΔfH⊖ for KCl = -436.7 kJ mol-1\nΔsubH⊖ for K = 89.2 kJ mol-1\nΔionisationH⊖ for K = 419.0 kJ mol-1\nΔelectron gainH⊖ for Cl(g) = -348.6 kJ mol-1\nΔbondH⊖ for Cl2 = 243.0 kJ mol-1\nThe magnitude of lattice enthalpy of KCl in kJ mol-1 is ..... . (Nearest integer)",
+    "images": [],
+    "options": [],
+    "correct": "718",
+    "raw_lines": []
+  },
+  {
+    "num": 49,
+    "type": "integer",
+    "prompt": "[Fe(CN)6]3- is an inner orbital complex. Ignoring the pairing energy, the value of crystal field stabilization energy for this complex is (-) ... Δo.",
+    "images": [],
+    "options": [],
+    "correct": "2",
+    "raw_lines": []
+  },
+  {
+    "num": 50,
+    "type": "integer",
+    "prompt": "The number of possible stereoisomers for the complex [Co(en)2Cl2]Cl is (en = ethylenediamine).",
+    "images": [],
+    "options": [],
+    "correct": "3",
+    "raw_lines": []
+  }
+]

@@ -32,8 +32,20 @@ function TestCardComponent({ test, eligibility, onStart }: TestCardProps) {
 
       <View style={styles.headerRow}>
         <Badge
-          label={test.type === 'scholarship' ? 'Scholarship' : 'Weekly'}
-          tone={test.type === 'scholarship' ? 'warning' : 'primary'}
+          label={
+            test.type === 'scholarship'
+              ? 'Scholarship'
+              : test.isOpenForAll || test.accessMode === 'OPEN_FOR_ALL' || !test.batchId || test.batchId === 'ALL'
+              ? 'Open for All'
+              : 'Weekly'
+          }
+          tone={
+            test.type === 'scholarship'
+              ? 'warning'
+              : test.isOpenForAll || test.accessMode === 'OPEN_FOR_ALL' || !test.batchId || test.batchId === 'ALL'
+              ? 'success'
+              : 'primary'
+          }
         />
         <Badge label={getTestStatusLabel(test)} tone={testActive ? 'success' : 'warning'} />
       </View>
@@ -51,13 +63,11 @@ function TestCardComponent({ test, eligibility, onStart }: TestCardProps) {
           <GraduationCap size={16} color={colors.accent} />
           <Text style={styles.metaLabel}>Batch</Text>
           <Text style={styles.metaValue}>
-            {test.allowedBatches && test.allowedBatches.length > 0
+            {test.isOpenForAll || test.accessMode === 'OPEN_FOR_ALL' || !test.batchId || test.batchId === 'ALL'
+              ? 'Open for All'
+              : test.allowedBatches && test.allowedBatches.length > 0
               ? test.allowedBatches.join(', ')
-              : test.batchId && test.batchId !== 'ALL'
-              ? test.batchId
-              : test.isOpenForAll
-              ? 'All batches'
-              : 'Restricted'}
+              : test.batchId}
           </Text>
         </View>
         <View style={styles.metaTile}>

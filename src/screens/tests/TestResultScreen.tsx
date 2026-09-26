@@ -10,14 +10,24 @@ import { Button } from '../../components/common/Button';
 import { Card } from '../../components/common/Card';
 import { Screen } from '../../components/common/Screen';
 import { RootStackScreenProps } from '../../navigation/types';
-import { fetchExistingAttemptForTest, fetchResultById } from '../../services/api/tests';
+import {
+  fetchExistingAttemptForTest,
+  fetchResultById,
+  getLocalStandardAttempt,
+  getLocalStandardAttemptByTestId,
+} from '../../services/api/tests';
+import {
+  BOOSTER_BATCH_TEST_ITEM,
+  isBoosterBatchTest,
+  isGrandTest,
+  isNavigatorBatchTest,
+  NAVIGATOR_BATCH_TEST_ITEM,
+} from '../../services/api/publishedGrandTests';
 import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
 import { colors, radius, spacing } from '../../theme';
 import { LeaderboardEntry, TestResult } from '../../types';
 import { formatDateTimeLabel } from '../../utils/formatters';
-
-import { NAVIGATOR_BATCH_TEST_ID, NAVIGATOR_BATCH_TEST_ITEM } from '../../services/api/navigatorBatchTestData';
 
 const EMPTY_LEADERBOARD: LeaderboardEntry[] = [];
 
@@ -33,19 +43,34 @@ interface SubjectScoreItem {
 export function TestResultScreen({ route, navigation }: RootStackScreenProps<'TestResult'>) {
   const { resultId, testId } = route.params;
   const user = useAuthStore((state) => state.user);
-  const storeResult = useAppStore((state) =>
-    state.results.find((entry) => entry.id === resultId || entry.id === route.params?.resultId)
-    || state.results.find((entry) => entry.testId === testId)
-  );
+  const storeResult = useAppStore((state) => {
+    if (resultId) {
+      const byId = state.results.find((entry) => entry.id === resultId);
+      if (byId) return byId;
+    }
+    if (testId) {
+      return state.results.find((entry) => entry.testId === testId);
+    }
+    return undefined;
+  });
   const [fetchedResult, setFetchedResult] = useState<TestResult | null>(null);
   const result = storeResult || fetchedResult;
   const [isResultLoading, setIsResultLoading] = useState<boolean>(!result);
   const storedLeaderboard = useAppStore((state) => state.testLeaderboards[testId]);
   const loadLeaderboard = useAppStore((state) => state.loadLeaderboard);
   const loadQuestions = useAppStore((state) => state.loadQuestions);
-  const test =
-    useAppStore((state) => state.tests.find((candidate) => candidate.id === testId)) ??
-    (testId === NAVIGATOR_BATCH_TEST_ID ? NAVIGATOR_BATCH_TEST_ITEM : undefined);
+  const bootstrap = useAppStore((state) => state.bootstrap);
+  const test = useAppStore((state) => {
+    if (isNavigatorBatchTest(testId)) return NAVIGATOR_BATCH_TEST_ITEM;
+    if (isBoosterBatchTest(testId)) return BOOSTER_BATCH_TEST_ITEM;
+    const found = state.tests.find((candidate) => candidate.id === testId);
+    if (found) {
+      if (isNavigatorBatchTest(found.id, found.title)) return NAVIGATOR_BATCH_TEST_ITEM;
+      if (isBoosterBatchTest(found.id, found.title)) return BOOSTER_BATCH_TEST_ITEM;
+      return found;
+    }
+    return undefined;
+  });
   const [leaderboardError, setLeaderboardError] = useState<string>();
   const [isLeaderboardLoading, setIsLeaderboardLoading] = useState(false);
   const leaderboard = storedLeaderboard ?? EMPTY_LEADERBOARD;
@@ -54,14 +79,21 @@ export function TestResultScreen({ route, navigation }: RootStackScreenProps<'Te
   const [subjectBreakdown, setSubjectBreakdown] = useState<SubjectScoreItem[]>([]);
 
   useEffect(() => {
+    if (!test && testId && !isGrandTest(testId)) {
+      void bootstrap(user).catch(() => undefined);
+    }
+  }, [bootstrap, test, testId, user]);
+
+  useEffect(() => {
     let active = true;
 
     async function loadSubjectBreakdown() {
-      if (!resultId) return;
+      const activeResultId = result?.id || resultId;
+      if (!activeResultId) return;
       try {
         const [reviews, questions] = await Promise.all([
-          loadReview(resultId),
-          loadQuestions(testId).catch(() => []),
+          loadReview(activeResultId).catch(() => []),
+          loadQuestions(testId, test?.title).catch(() => []),
         ]);
 
         if (!active || !reviews.length) return;
@@ -209,9 +241,20 @@ export function TestResultScreen({ route, navigation }: RootStackScreenProps<'Te
         setIsResultLoading(true);
         let loaded = resultId ? await fetchResultById(resultId) : null;
 
+        if (!loaded && resultId) {
+          loaded = await getLocalStandardAttempt(resultId);
+        }
+
         if (!loaded && testId) {
           const user = useAuthStore.getState().user;
-          loaded = await fetchExistingAttemptForTest(testId, user?.id);
+          loaded = await getLocalStandardAttemptByTestId(testId, user?.id);
+        }
+
+        if (!loaded && testId) {
+          const user = useAuthStore.getState().user;
+          if (user?.id) {
+            loaded = await fetchExistingAttemptForTest(testId, user.id);
+          }
         }
 
         if (active) {
@@ -274,7 +317,11 @@ export function TestResultScreen({ route, navigation }: RootStackScreenProps<'Te
 
   return (
     <Screen contentContainerStyle={styles.content}>
-      <AppHeader title="Test Result" subtitle={test?.title ?? 'Official scorecard'} />
+      <AppHeader
+        title="Test Result"
+        subtitle={test?.title ?? 'Official scorecard'}
+        onBack={() => navigation.navigate('MainTabs', { screen: 'Tests' })}
+      />
 
       {/* 1. Candidate Info Card */}
       <Animated.View entering={FadeInDown.delay(20)}>
@@ -461,7 +508,7 @@ export function TestResultScreen({ route, navigation }: RootStackScreenProps<'Te
         )}
       </Card>
 
-      <Button variant="secondary" onPress={() => navigation.navigate('ReviewAnswers', { testId, resultId })}>
+      <Button variant="secondary" onPress={() => navigation.navigate('ReviewAnswers', { testId, resultId: result.id || resultId })}>
         Check Your Answers
       </Button>
 

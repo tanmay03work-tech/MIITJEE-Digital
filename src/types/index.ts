@@ -81,8 +81,6 @@ export interface TestItem {
   correctMarks?: number;
   wrongMarks?: number;
   unattemptedMarks?: number;
-  isPdfNative?: boolean;
-  pdfId?: string;
 }
 
 export type ExamLinkStatus = 'VALID' | 'INVALID' | 'REVOKED' | 'EXPIRED' | 'BATCH_RESTRICTED';
@@ -100,7 +98,7 @@ export interface TestQuestion {
   prompt: string;
   options: string[];
   correctAnswer: string;
-  integerAnswer?: number;
+  integerAnswer?: number | null;
   explanation: string;
   imageUrl?: string | null;
   optionImageUrls?: string[];
@@ -110,12 +108,6 @@ export interface TestQuestion {
   aiConfidence?: number;
   needsReview?: boolean;
   hasAnswerKeyMatch?: boolean;
-  pdfNativeBbox?: { x: number; y: number; width: number; height: number };
-  pdfNativeRegions?: import('../services/pdf-native/pdfNativeTypes').PdfNativeRegion[];
-  pdfNativePage?: number;
-  pdfId?: string;
-  pdfUrl?: string;
-  nativeStructure?: import('../services/pdf-native/nativeQuestionTypes').NativeQuestionStructure;
 }
 
 export interface TestResult {
@@ -131,7 +123,6 @@ export interface TestResult {
   rank: number;
   percentile: number;
   submittedAt: string;
-  isPdfNative?: boolean;
 }
 
 export interface TestAttemptReviewItem {

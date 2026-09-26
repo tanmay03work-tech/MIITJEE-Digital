@@ -93,4 +93,41 @@ describe('Phase 13 - Open-For-All Access Control Tests', () => {
     expect(result.allowed).toBe(true);
     expect(Boolean(result.reason.includes('Open For All'))).toBe(true);
   });
+
+  test('Test 6: Weekly test open for all is accessible to any student role via getEligibility', () => {
+    const { getEligibility } = require('../../utils/accessControl');
+    const weeklyOpenTest = {
+      id: 'test_weekly_open_1',
+      title: 'Weekly Mock Test - Open For All',
+      description: 'Weekly test open for everyone',
+      durationMinutes: 60,
+      questionCount: 25,
+      type: 'weekly' as const,
+      subject: 'Physics',
+      scheduledAt: new Date().toISOString(),
+      isPublished: true,
+      isStarted: true,
+      isOpenForAll: true,
+      batchId: undefined,
+      accessMode: 'OPEN_FOR_ALL' as const,
+    };
+
+    // 1. Regular student with no batch
+    const studentNoBatch = { id: 'u1', fullName: 'A', phone: '123', email: 'a@test.com', role: 'student' as const, batchId: undefined, createdAt: '' };
+    expect(getEligibility(studentNoBatch, weeklyOpenTest).allowed).toBe(true);
+    expect(getEligibility(studentNoBatch, weeklyOpenTest).ctaLabel).toBe('Start Paper');
+
+    // 2. MIITJEE student in different batch
+    const miitjeeStudent = { id: 'u2', fullName: 'B', phone: '123', email: 'b@test.com', role: 'miitjee_student' as const, batchId: 'BATCH_NEET_2026', createdAt: '' };
+    expect(getEligibility(miitjeeStudent, weeklyOpenTest).allowed).toBe(true);
+    expect(getEligibility(miitjeeStudent, weeklyOpenTest).ctaLabel).toBe('Start Paper');
+
+    // 3. Admin user
+    const adminUser = { id: 'u3', fullName: 'Admin', phone: '123', email: 'admin@test.com', role: 'admin' as const, createdAt: '' };
+    expect(getEligibility(adminUser, weeklyOpenTest).allowed).toBe(true);
+
+    // 4. Guest / Unauthenticated student
+    expect(getEligibility(null, weeklyOpenTest).allowed).toBe(true);
+    expect(getEligibility(null, weeklyOpenTest).ctaLabel).toBe('Start Paper');
+  });
 });

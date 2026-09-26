@@ -1,0 +1,484 @@
+P0: Miitjee
+P1: Subject   : Physics
+P2: Standard  : 12
+P3: Total Mark : 100
+P4: Paper Set : 1
+P5: Date      : 04-09-2026
+P6: Time      : 0H:0M
+P7: Navigator physics
+P8: Physics - Section A (MCQ)
+P9: Q1. A 3 V battery with negligible internal resistance is connected in a circuit as shown in the figure. The current I in the circuit will be ………… A.
+P10:  [IMAGES: ['image1.png']]
+P11: (A) 1/3
+P12: (B) 1
+P13: (C) 1.5
+P14: (D) 2
+P15: Correct Answer: C
+P16: Q2. A capacitor of capacitance 2 µF is charged to 50 V and then disconnected from the source. Later, the gap between the plates of the capacitor is filled with a dielectric material. If the energy stored in the capacitor is decreased by 25% of its initial value, then the dielectric constant of the dielectric material is
+P17: (A) 2/3
+P18: (B) 4/3
+P19: (C) 3/4
+P20: (D) 3/2
+P21: Correct Answer: B
+P22: Q3. A cylindrical conductor of length 2 m and area of cross-section 0.2 mm² carries an electric current of 1.6 A when its ends are connected to a 2 V battery. Mobility of electrons in the conductor is α × 10⁻³ m²/V·s. The value of α is: (electron concentration n = 5 × 10²⁸ m⁻³ and electron charge e = 1.6 × 10⁻¹⁹ C)
+P23: (A) 1
+P24: (B) 2
+P25: (C) 0.5
+P26: (D) 4
+P27: Correct Answer: A
+P28: Q4. Energy of a charged capacitor is U. Now it is removed from a battery and then connected to two other identical uncharged capacitors in parallel. What will be the energy of each capacitor?
+P29: (A) U/4
+P30: (B) 3U/2
+P31: (C) U
+P32: (D) U/9
+P33: Correct Answer: D
+P34: Q5. The electric potential (V) as a function of distance (x) [in meters] is given by V = (5x² + 10x − 9) V. The value of the electric field at x = 1 m would be ….. V/m.
+P35: (A) 20
+P36: (B) 6
+P37: (C) 11
+P38: (D) −20
+P39: Correct Answer: D
+P40: Q6. Two charged particles of masses m and 2m have charges +2q and +q respectively. They are kept in a uniform electric field and allowed to move for the same time. The ratio of their kinetic energies will be
+P41: (A) 1 : 1
+P42: (B) 4 : 1
+P43: (C) 1 : 4
+P44: (D) 8 : 1
+P45: Correct Answer: D
+P46: Q7. Two point charges (+Q) and (−2Q) are fixed on the X-axis at positions a and 2a from the origin, respectively. At what position on the axis is the resultant electric field zero?
+P47: (A) Only x = √2 a
+P48: (B) Only x = −√2 a
+P49: (C) Both x = ±√2 a
+P50: (D) x = 3a/2 only
+P51: Correct Answer: B
+P52: Q8. A parallel plate capacitor of capacitance 500 pF is charged with a 100 V supply. It is then disconnected from the supply and connected to another uncharged 500 pF capacitor. The electrostatic energy lost in this process is (in µJ)
+P53: (A) 1.25
+P54: (B) 0.175
+P55: (C) 0.225
+P56: (D) 0.275
+P57: Correct Answer: A
+P58: Q9. Two metal wires of identical dimensions are connected in series. If σ1 and σ2 are the conductivities of the metal wires respectively, the effective conductivity of the combination is
+P59: (A) σ1σ2 / (σ1 + σ2)
+P60: (B) 2σ1σ2 / (σ1 + σ2)
+P61: (C) (σ1 + σ2) / (2σ1σ2)
+P62: (D) (σ1 + σ2) / (σ1σ2)
+P63: Correct Answer: B
+P64: Q10. A 10 µF capacitor and a 20 µF capacitor are connected in series across a 200 V supply line. The charged capacitors are then disconnected from the line and reconnected with their positive plates together and negative plates together, and no external voltage is applied. What is the potential difference across each capacitor?
+P65: (A) 400/9 V
+P66: (B) 800/9 V
+P67: (C) 400 V
+P68: (D) 200 V
+P69: Correct Answer: B
+P70: Q11. A parallel plate air-filled capacitor of capacitance C1 has plate area A and the distance between the plates d. When a metal sheet of thickness d/2 and of the same area A is introduced between the plates, its capacitance becomes C2. The ratio C2 : C1 is
+P71: (A) 4 : 1
+P72: (B) 2 : 1
+P73: (C) 3 : 1
+P74: (D) 3 : 2
+P75: Correct Answer: B
+P76: Q12. A uniform metallic wire having resistance 4 Ω is bent to form a square loop (ABCD) (see figure). A resistance of 2 Ω is connected between points B and D and a battery of 2 V is connected across points A and C as shown in the figure. Now the value of current (I) is: (in A)
+P77:  [IMAGES: ['image2.png']]
+P78: (A) 4
+P79: (B) 4.5
+P80: (C) 8
+P81: (D) 2
+P82: Correct Answer: D
+P83: Q13. In the following, I refers to current and other symbols have their usual meaning. Choose the option that corresponds to the dimensions of electrical conductivity.
+P84: (A) M⁻¹L⁻³T³I
+P85: (B) M⁻¹L⁻³T³I²
+P86: (C) M⁻¹L³T³I
+P87: (D) ML⁻³T⁻³I²
+P88: Correct Answer: B
+P89: Q14. Drift speed of electrons, when 1.5 A of current flows in a copper wire of cross-section 5 mm², is v. If the electron density in copper is 9 × 10²⁸ m⁻³, the value of v in mm/s is close to (Take charge of electron to be 1.6 × 10⁻¹⁹ C).
+P90: (A) 0.02
+P91: (B) 3
+P92: (C) 2
+P93: (D) 0.2
+P94: Correct Answer: A
+P95: Q15. A copper wire is stretched to make it 0.5% longer. The percentage change in its electric resistance if its volume remains unchanged is ……… %
+P96: (A) 2
+P97: (B) 2.5
+P98: (C) 1
+P99: (D) 0.5
+P100: Correct Answer: C
+P101: Q16. In the given circuit, the cells have zero internal resistance. The currents (in Amperes) passing through resistance R1 and R2 respectively, are
+P102:  [IMAGES: ['image3.png']]
+P103: (A) 1, 2
+P104: (B) 2, 2
+P105: (C) 0.5, 0
+P106: (D) 0, 1
+P107: Correct Answer: C
+P108: Q17. The charge on a capacitor plate in a circuit, as a function of time, is shown in the figure. What is the value of current at t = 4 s? ………… µA
+P109:  [IMAGES: ['image4.png']]
+P110: (A) 0
+P111: (B) 3
+P112: (C) 2
+P113: (D) 1.5
+P114: Correct Answer: A
+P115: Q18. In the given circuit, an ideal voltmeter connected across the 10 Ω resistance reads 2 V. The internal resistance r of each cell is ……….. Ω.
+P116:  [IMAGES: ['image5.png']]
+P117: (A) 1
+P118: (B) 0.5
+P119: (C) 1.5
+P120: (D) 0
+P121: Correct Answer: B
+P122: Q19. A current of 5 A passes through a copper conductor (resistivity = 1.7 × 10⁻⁸ Ω m) of radius of cross-section 5 mm. Find the mobility of the charges if their drift velocity is 1.1 × 10⁻³ m/s.
+P123: (A) 1.8
+P124: (B) 1.0
+P125: (C) 1.3
+P126: (D) 1.5
+P127: Correct Answer: B
+P128: Q20. The resistive network shown below is connected to a D.C. source of 16 V. The power consumed by the network is 4 W. The value of R is ………… Ω.
+P129:  [IMAGES: ['image6.png']]
+P130: (A) 8
+P131: (B) 6
+P132: (C) 16
+P133: (D) 1
+P134: Correct Answer: A
+P135: Physics - Section B (Numeric)
+P136: Q21. The effective resistance of a parallel connection that consists of four wires of equal length, equal area of cross-section, and same material is 0.25 Ω. What will be the effective resistance if they are connected in series? (In Ω)
+P137: Correct Answer: 4
+P138: Q22. An infinitely long solid cylinder of radius R has a uniform volume charge density ρ. It has a spherical cavity of radius R/2 with its centre on the axis of the cylinder, as shown in the figure. The magnitude of the electric field at the point P, which is at a distance 2R from the axis of the cylinder, is given by the expression 23ρR / (16kε0). The value of k is
+P139:  [IMAGES: ['image7.png']]
+P140: Correct Answer: 6
+P141: Q23. A 2 µF capacitor C1 is first charged to a potential difference of 10 V using a battery. Then the battery is removed and the capacitor is connected to an uncharged capacitor C2 of 8 µF. The charge in C2 on equilibrium condition is … µC. (Round off to the Nearest Integer)
+P142:  [IMAGES: ['image8.png']]
+P143: Correct Answer: 16
+P144: Q24. If a particle of mass 10 mg and charge 2 µC at rest is subjected to a uniform electric field of potential difference 160 V, then the velocity acquired by the particle is (in ms⁻¹)
+P145: Correct Answer: 8
+P146: Q25. The electric field in a region is given by E⃗ = (2/5)E0 î + (3/5)E0 ĵ with E0 = 4.0 × 10³ N/C. The flux of this field through a rectangular surface area 0.4 m² parallel to the Y−Z plane is …… Nm²C⁻¹.
+P147: Correct Answer: 640
+P149: Miitjee
+P150: Subject   : Chemistry
+P151: Standard  : 11
+P152: Total Mark : 100
+P153: Paper Set : 1
+P154: Date      : 04-09-2026
+P155: Time      : 1H:0M
+P156: Navigator
+P157: Chemistry - Section A (MCQ)
+P158: Q26. Given below are two statements:
+P159: Statement (I): The oxidation state of an element in a particular compound is the charge acquired by its atom on the basis of electron gain enthalpy consideration from other atoms in the molecule.
+P160: Statement (II): pπ − pπ bond formation is more prevalent in second period elements over other periods.
+P161: In the light of the above statements, choose the most appropriate answer from the options given below:
+P162: (A) Both Statement I and Statement II are incorrect
+P163: (B) Statement I is correct but Statement II is incorrect
+P164: (C) Both Statement I and Statement II are correct
+P165: (D) Statement I is incorrect but Statement II is correct
+P166: Correct Answer: D
+P167: Q27. Which one of the following pairs of isomers is an example of metamerism?
+P168: (A) CH3−CH2−CH2−CH2−CH3 and CH3−C(CH3)2−CH3
+P169: (B) CH3−CH2−CO−CH2−CH3 and CH3−CO−CH2−CH2−CH3
+P170: (C) CH3−CH2−CH2−NH2 and CH3−CH(NH2)−CH3
+P171: (D) CH3−CH2−OH and CH3−O−CH3
+P172: Correct Answer: B
+P173: Q28. Tautomerism is exhibited by
+P174: (A) (Me3CCO)3CH
+P175: (B) Cyclohex−2−ene−1,4−dione
+P176: (C) Cyclohexa−2,5−diene−1,4−dione
+P177: (D) Cyclohexane−1,2−dione
+P178: Correct Answer: B
+P179: Q29. The ground state electronic configuration of CO molecule is
+P180: (A) 1σ²2σ²1π⁴3σ²
+P181: (B) 1σ²2σ²3σ²1π²2π²
+P182: (C) 1σ²2σ²1π²3σ²2π²
+P183: (D) 1σ²1π²2σ²2σ²
+P184: Correct Answer: A
+P185: Q30. Given below are two statements:
+P186: Statement I: The correct order in terms of bond dissociation enthalpy is Cl2 > Br2 > F2 > I2.
+P187: Statement II: The correct trend in the covalent character of the metal halides is [SnCl4 > SnCl2], [PbCl4 > PbCl2] and [UF4 > UF6].
+P188: In the light of the above statements, choose the correct answer from the options given below:
+P189: (A) Statement I is true but Statement II is false
+P190: (B) Both Statement I and Statement II are true
+P191: (C) Statement I is false but Statement II is true
+P192: (D) Both Statement I and Statement II are false
+P193: Correct Answer: A
+P194: Q31. The hydration energies of K⁺ and Cl⁻ are −x and −y kJ/mol respectively. If the lattice energy of KCl is −z kJ/mol, then the heat of solution of KCl is:
+P195: (A) +x − y − z
+P196: (B) x + y + z
+P197: (C) z − (x + y)
+P198: (D) −z − (x + y)
+P199: Correct Answer: C
+P200: Q32. The compound with the molecular formula C3H6O can show:
+P201: (A) Positional isomerism
+P202: (B) Both positional isomerism and metamerism
+P203: (C) Metamerism
+P204: (D) Functional group isomerism
+P205: Correct Answer: D
+P206: Q33. Arrange the following bonds according to their average bond energies in descending order:
+P207: C−Cl, C−Br, C−F, C−I
+P208: (A) C−I > C−Br > C−Cl > C−F
+P209: (B) C−Br > C−I > C−Cl > C−F
+P210: (C) C−F > C−Cl > C−Br > C−I
+P211: (D) C−Cl > C−Br > C−I > C−F
+P212: Correct Answer: C
+P213: Q34. Given below are two statements:
+P214: Statement I: Aluminium upon reaction with NaOH forms [Al(OH)6]³⁻ ion.
+P215: Statement II: The geometry of ICl4⁻, ClO3⁻, and IBr2⁻ is square planar, pyramidal, and linear respectively.
+P216: In the light of the above statements, choose the correct answer from the options given below:
+P217: (A) Both Statement I and Statement II are true
+P218: (B) Both Statement I and Statement II are false
+P219: (C) Statement I is true but Statement II is false
+P220: (D) Statement I is false but Statement II is true
+P221: Correct Answer: A
+P222: Q35. Which one of the following pairs of species have the same bond order?
+P223: (A) O2, NO⁺
+P224: (B) CN⁻, CO
+P225: (C) N2, O2⁻
+P226: (D) CO, NO
+P227: Correct Answer: B
+P228: Q36. Which of the following compounds is asymmetric?
+P229: (A) cis−1−bromo−3−chlorocyclobutane
+P230: (B) 1−bromo−2,2−dichlorocyclopropane
+P231: (C) trans−1−bromo−3−chlorocyclobutane
+P232: (D) 1−bromo−2,2−dichlorocyclopropane (with different stereochemistry)
+P233: Correct Answer: C
+P234: Q37. Match List-I with List-II.
+P235: List-I
+P236: List-II
+P237: A. ICl
+P238: i. Linear
+P240: undefined
+P241: B. ICl3
+P242: ii. T-Shape
+P243: C. ClF5
+P244: iii. Square pyramidal
+P245: D. IF7
+P246: iv. Pentagonal bipyramidal
+P247: Choose the correct answer from the options given below:
+P248: (A) A−i, B−ii, C−iii, D−iv
+P249: (B) A−i, B−ii, C−iv, D−iii
+P250: (C) A−iv, B−ii, C−iii, D−i
+P251: (D) A−iv, B−iii, C−ii, D−i
+P252: Correct Answer: A
+P253: Q38. The hydrides of the first elements in groups 15−17, namely NH3, H2O and HF respectively show abnormally high values for melting and boiling points. This is due to
+P254: (A) small size of N, O and F
+P255: (B) the ability to form extensive intermolecular H-bonding
+P256: (C) the ability to form extensive intramolecular H-bonding
+P257: (D) effective van der Waals' interaction
+P258: Correct Answer: B
+P259: Q39. Which of the following pairs of compounds are positional isomers?
+P260: (A) CH3−CH2−CH2−CO−CH3 and CH3−CH2−CO−CH2−CH3
+P261: (B) CH3−CH2−CH2−CH2−CHO and CH3−CH2−CH2−CO−CH3
+P262: (C) CH3−CH2−CH2−CO−CH3 and CH3−CH(CH3)−CH2−CHO
+P263: (D) CH3−CH2−CO−CH2−CH3 and CH3−CH(CH3)−CH2−CHO
+P264: Correct Answer: A
+P265: Q40. Identify the correct statements from the following. Choose the correct answer from the options given below.
+P266: A. Pentan−3−one and Pentan−2−one are metamers.
+P267: B. Butanenitrile and Butaneisonitrile are functional isomers.
+P268: C. Butan−1−ol and Butan−2−ol are position isomers.
+P269: D. Butan−1−amine and N-methylpropan−1−amine are homologous.
+P270: (A) C & D only
+P271: (B) B & C only
+P272: (C) A & B only
+P273: (D) A, B & C only
+P274: Correct Answer: D
+P275: Q41. Which one of the following compounds shows the presence of intramolecular hydrogen bond?
+P276: (A) H2O2
+P277: (B) HCN
+P278: (C) Cellulose
+P279: (D) Concentrated acetic acid
+P280: Correct Answer: C
+P281: Q42. The molecule/ion with square pyramidal shape is:
+P282: (A) [Ni(CN)4]²⁻
+P283: (B) PCl5
+P284: (C) BrF5
+P285: (D) PF5
+P286: Correct Answer: C
+P287: Q43. Which amongst the following is an incorrect statement?
+P288: (A) C2 molecule has four electrons in its two degenerate π molecular orbitals.
+P289: (B) H2⁺ ion has one electron.
+P290: (C) O2⁺ ion is diamagnetic.
+P291: (D) The bond orders of O2⁺, O2, O2⁻ and O2²⁻ are 2.5, 2, 1.5 and 1, respectively.
+P292: Correct Answer: C
+P293: Q44. Which of the following molecules shows the least resonance stabilization?
+P294: (A) Benzene
+P295: (B) Furan
+P296: (C) Pyridine
+P297: (D) 4,4−dimethylcyclohexa−2,5−dien−1−one
+P298: Correct Answer: D
+P299: Q45. Match List-I with List-II according to shape.
+P300: List-I
+P301: List-II
+P302: A. XeO3
+P303: I. BrF5
+P304: B. XeF2
+P305: II. NH3
+P306: C. XeO2F2
+P307: III. [I3]⁻
+P308: D. XeOF4
+P309: IV. SF4
+P310: Choose the correct answer from the options given below:
+P311: (A) A−II, B−III, C−IV, D−I
+P312: (B) A−II, B−I, C−III, D−IV
+P313: (C) A−II, B−III, C−I, D−IV
+P314: (D) A−II, B−II, C−IV, D−I
+P315: Correct Answer: A
+P316: Chemistry - Section B (Numeric)
+P317: Q46. The number of structural isomers for C6H14 is
+P318: Correct Answer: 5
+P319: Q47. In the Lewis dot structure for NO2⁻, the total number of valence electrons around the nitrogen atom is …….
+P320: Correct Answer: 8
+P321: Q48. In gaseous triethylamine, the C−N−C bond angle is ….. degrees.
+P322: Correct Answer: 108
+P323: Q49. Among H2S, H2O, NF3, NH3 and CHCl3, identify the molecule (X) with the lowest dipole moment value. The number of lone pairs of electrons present on the central atom of the molecule (X) is:
+P324: Correct Answer: 1
+P325: Q50. A compound is formed by the substitution of two hydrogen atoms with two chlorine atoms in propane. The number of possible isomeric compounds is
+P326: Correct Answer: 5
+P328: Mathematics
+P329: Mathematics - Section A (MCQ)
+P330: Q51. If the term independent of x in the expansion of (√a·x² + 1/(2x³))¹⁰ is 105, then a² is equal to:
+P331: (A) 4
+P332: (B) 9
+P333: (C) 6
+P334: (D) 2
+P335: Correct Answer: A
+P336: Q52. Find the value of (18³ + 7³ + 3×18×7×25) / (3⁶ + 6×243×2 + 15×81×4 + 20×27×8 + 15×9×16 + 6×3×32 + 64)
+P337: (A) 1
+P338: (B) 5
+P339: (C) 25
+P340: (D) 100
+P341: Correct Answer: A
+P342: Q53. The positive integer just greater than (1 + 0.0001)¹⁰⁰⁰⁰ is
+P343: (A) 4
+P344: (B) 5
+P345: (C) 2
+P346: (D) 3
+P347: Correct Answer: D
+P348: Q54. The number of rational terms in the binomial expansion of (4^(1/4) + 5^(1/6))¹²⁰ is ….
+P349: (A) 120
+P350: (B) 21
+P351: (C) 41
+P352: (D) 61
+P353: Correct Answer: B
+P354: Q55. The sum of the coefficients in the expansion of (x + y)ⁿ is 4096. The greatest coefficient in the expansion is
+P355: (A) 1024
+P356: (B) 924
+P357: (C) 824
+P358: (D) 724
+P359: Correct Answer: B
+P360: Q56. If A denotes the sum of all the coefficients in the expansion of (1 − 3x + 10x²)ⁿ and B denotes the sum of all the coefficients in the expansion of (1 + x²)ⁿ, then:
+P361: (A) A = B³
+P362: (B) 3A = B
+P363: (C) B = A³
+P364: (D) A = 3B
+P365: Correct Answer: A
+P366: Q57. Statement −1: For every natural number n, (n + 1)⁷ − n⁷ − 1 is divisible by 7.
+P367: Statement −2: For every natural number n, n⁷ − n is divisible by 7.
+P368: (A) Statement −1 is false, Statement −2 is true.
+P369: (B) Statement −1 is true, Statement −2 is false.
+P370: (C) Statement −1 is true, Statement −2 is true; Statement −2 is not a correct explanation for Statement −1.
+P371: (D) Statement −1 is true, Statement −2 is true; Statement −2 is a correct explanation for Statement −1.
+P372: Correct Answer: D
+P373: Q58. If the coefficients of x⁷ and x⁸ in the expansion of (2 + x/3)ⁿ are equal, then the value of n is equal to …..
+P374: (A) 44
+P375: (B) 55
+P376: (C) 48
+P377: (D) 61
+P378: Correct Answer: B
+P379: Q59. If n is a positive integer, then (√3 + 1)²ⁿ − (√3 − 1)²ⁿ is
+P380: (A) an irrational number
+P381: (B) an odd positive integer
+P382: (C) an even positive integer
+P383: (D) a rational number other than positive integers
+P384: Correct Answer: A
+P385: Q60. C1/C0 + 2·C2/C1 + 3·C3/C2 + ⋯ + 15·C15/C14 =
+P386: (A) 100
+P387: (B) 120
+P388: (C) −120
+P389: (D) None of these
+P390: Correct Answer: B
+P391: Q61. The number of terms which are free from radical signs in the expansion of (y^(1/5) + x^(1/10))⁵⁵ is
+P392: (A) 5
+P393: (B) 6
+P394: (C) 7
+P395: (D) None of these
+P396: Correct Answer: B
+P397: Q62. The coefficient of x² in the expansion of (2x² + 1/x)¹⁰, x ≠ 0, is:
+P398: (A) 3240
+P399: (B) 3360
+P400: (C) 3480
+P401: (D) 3600
+P402: Correct Answer: B
+P403: Q63. The values of p and q for which the function
+P404: f(x) = { [sin((p+1)x) + sin x] / x , for x < 0 ;  q , for x = 0 ;  [√(x + x²) − √x] / x^(3/2) , for x > 0 }
+P405: is continuous for ∀x ∈ R are
+P406: (A) (−3/2, 1/2)
+P407: (B) (1/2, 3/2)
+P408: (C) (1/2, −3/2)
+P409: (D) (5/2, 1/2)
+P410: Correct Answer: A
+P411: Q64. The function f : R − {0} → R, given by f(x) = 1/x − 2/(e^(2x) − 1) can be made continuous at x = 0 by defining f(0) as:
+P412: (A) 2
+P413: (B) −1
+P414: (C) 0
+P415: (D) 1
+P416: Correct Answer: D
+P417: Q65. Let f : R → R be a function given by
+P418: f(x) = { (1 − cos 2x)/x² , x < 0 ;  α , x = 0 ;  β·√(1 − cos x)/x , x > 0 }.
+P419: If f is continuous at x = 0, then α² + β² is equal to:
+P420: (A) 48
+P421: (B) 12
+P422: (C) 3
+P423: (D) 6
+P424: Correct Answer: B
+P425: Q66. If f(x) = { x + a , x ≤ 0 ;  |x − 4| , x > 0 }  and g(x) = { x + 1 , x < 0 ;  (x − 4)² + b , x ≥ 0 }  are continuous on ℝ, then (g∘f)(2) + (f∘g)(−2) is equal to.
+P426: (A) −10
+P427: (B) 10
+P428: (C) 8
+P429: (D) −8
+P430: Correct Answer: D
+P431: Q67. Let f : (−π/4, π/4) → R be defined as
+P432: f(x) = { (1 + |sin x|)^(3a/|sin x|) , −π/4 < x < 0 ;  b , x = 0 ;  e^(cot4x/cot2x) , 0 < x < π/4 }
+P433: If f is continuous at x = 0, then the value of 6a + b² is equal to
+P434: (A) e
+P435: (B) 1 + e
+P436: (C) 1 − e
+P437: (D) e − 1
+P438: Correct Answer: B
+P439: Q68. Let a, b ∈ R, b ≠ 0. Define a function f(x) = { a·sin[(π/2)(x−1)] , for x ≤ 0 ;  (tan2x − sin2x)/(bx³) , for x > 0 }. If f is continuous at x = 0, then 10 − ab is equal to …… .
+P440: (A) 10
+P441: (B) 14
+P442: (C) 8
+P443: (D) 3
+P444: Correct Answer: B
+P445: Q69. Let f(x) = [2x² + 1] and g(x) = { 2x − 3 , x < 0 ;  2x + 3 , x ≥ 0 }, where [t] denotes the greatest integer function ≤ t. Then, in the open interval (−1, 1), the number of points where f(g(x)) is discontinuous is equal to:
+P446: (A) 62
+P447: (B) 60
+P448: (C) 85
+P449: (D) 90
+P450: Correct Answer: A
+P451: Q70. Let f(x) = min{1, 1 + x sin x} for 0 ≤ x ≤ 2π. If m is the number of points where f is not differentiable and n is the number of points where f is not continuous, then the ordered pair (m, n) is equal to
+P452: (A) (2, 0)
+P453: (B) (1, 0)
+P454: (C) (1, 1)
+P455: (D) (2, 1)
+P456: Correct Answer: B
+P457: Q71. The function f(x) = [x]² − [x²], (where [y] is the greatest integer less than or equal to y), is discontinuous at
+P458: (A) All integers
+P459: (B) All integers except 0 and 1
+P460: (C) All integers except 0
+P461: (D) All integers except 1
+P462: Correct Answer: D
+P463: Q72. If the function f defined on (π/6, π/3) by f(x) = { (√2·cos x − 1)/(cot x − 1) , x ≠ π/4 ;  k , x = π/4 }  is continuous, then k is
+P464: (A) 1/2
+P465: (B) 2
+P466: (C) 1
+P467: (D) 1/√2
+P468: Correct Answer: A
+P469: Q73. If f(x) = { (x² − 4x + 3)/(x² − 1) , x ≠ 1 ;  2 , x = 1 }, then:
+P470: (A) lim x→1⁺ f(x) = 2
+P471: (B) lim x→1⁻ f(x) = 3
+P472: (C) f(x) is discontinuous at x = 1
+P473: (D) None of these
+P474: Correct Answer: C
+P475: Q74. If the function f(x) = { [loge(1 − x + x²) + loge(1 + x + x²)] / (sec x − cos x) , x ∈ (−π/2, π/2) − {0} ;  k , x = 0 }  is continuous at x = 0, then k is equal to.
+P476: (A) 1
+P477: (B) −1
+P478: (C) e
+P479: (D) 0
+P480: Correct Answer: A
+P481: Q75. Let [x] denote the greatest integer less than or equal to x. If f(x) = [x sin πx], then f(x) is
+P482: (A) Continuous at x = 0
+P483: (B) Continuous in (−1, 0)
+P484: (C) Differentiable in (−1, 1)
+P485: (D) All the above
+P486: Correct Answer: D

@@ -103,9 +103,12 @@ const styles = StyleSheet.create({
   },
   optionImage: {
     width: '100%',
-    height: 120,
-    borderRadius: radius.md,
+    maxWidth: '100%',
+    maxHeight: 85,
+    height: 65,
+    borderRadius: radius.sm,
     marginTop: spacing.xs,
+    alignSelf: 'flex-start',
   },
   textSelected: {
     color: colors.primaryDeep,

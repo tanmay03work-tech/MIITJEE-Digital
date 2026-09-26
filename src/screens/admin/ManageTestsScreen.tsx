@@ -104,9 +104,12 @@ export function ManageTestsScreen() {
   const isAdmin = user?.role === 'admin' && user.approvalStatus === 'approved';
   const deferredSearchTerm = useDeferredValue(searchTerm);
 
+  const testsRef = React.useRef<TestItem[]>([]);
+  testsRef.current = tests;
+
   const loadTestsPage = useCallback(
     async (reset: boolean, searchValue: string) => {
-      const offset = reset ? 0 : tests.length;
+      const offset = reset ? 0 : testsRef.current.length;
       const loader = reset ? setLoadingInitial : setLoadingMore;
       loader(true);
       try {
@@ -115,7 +118,11 @@ export function ManageTestsScreen() {
           limit: PAGE_SIZE,
           search: searchValue,
         });
-        setTests((current) => (reset ? rows : [...current, ...rows]));
+        setTests((current) => {
+          const next = reset ? rows : [...current, ...rows];
+          testsRef.current = next;
+          return next;
+        });
         setHasMore(rows.length === PAGE_SIZE);
       } catch (error) {
         Alert.alert('Unable to load tests', error instanceof Error ? error.message : 'Please try again.');
@@ -123,7 +130,7 @@ export function ManageTestsScreen() {
         loader(false);
       }
     },
-    [tests.length],
+    [],
   );
 
   useFocusEffect(
@@ -205,10 +212,7 @@ export function ManageTestsScreen() {
       return;
     }
 
-    if (draft.type === 'weekly' && !draft.batchId && !draft.isOpenForAll) {
-      Alert.alert('Batch required', 'Select a batch for restricted exams or switch Access Type to Open for All.');
-      return;
-    }
+    const isWeeklyOpen = draft.isOpenForAll || !draft.batchId;
 
     try {
       const scheduledAt = combineScheduleInputs(draft.scheduleDate, draft.scheduleTime);
@@ -220,8 +224,8 @@ export function ManageTestsScreen() {
         durationMinutes: coerceDurationMinutes(draft.durationMinutes),
         scheduledAt,
         type: draft.type,
-        batchId: draft.type === 'weekly' ? (draft.batchId || undefined) : undefined,
-        isOpenForAll: draft.isOpenForAll,
+        batchId: isWeeklyOpen ? undefined : (draft.batchId || undefined),
+        isOpenForAll: isWeeklyOpen || draft.isOpenForAll,
         scholarshipAdmissionClass: draft.type === 'scholarship' ? draft.scholarshipAdmissionClass : undefined,
         scholarshipTargetExam: draft.type === 'scholarship' ? draft.scholarshipTargetExam : undefined,
       });
@@ -306,6 +310,18 @@ export function ManageTestsScreen() {
         <Card style={styles.testCard}>
           <View style={styles.badgeRow}>
             <Badge label={test.type} tone={test.type === 'scholarship' ? 'warning' : 'primary'} />
+            <Badge
+              label={
+                test.isOpenForAll || test.accessMode === 'OPEN_FOR_ALL' || !test.batchId || test.batchId === 'ALL'
+                  ? 'Open for All'
+                  : test.batchId || 'Batch Restricted'
+              }
+              tone={
+                test.isOpenForAll || test.accessMode === 'OPEN_FOR_ALL' || !test.batchId || test.batchId === 'ALL'
+                  ? 'success'
+                  : 'primary'
+              }
+            />
             <Badge label={statusLabel} tone={testActive ? 'success' : 'warning'} />
             {test.shareCode ? <Badge label={`Code: ${test.shareCode}`} tone="primary" /> : null}
           </View>
@@ -315,7 +331,11 @@ export function ManageTestsScreen() {
             {test.description}
           </Text>
           <Text style={styles.meta}>{`Starts: ${formatDateTimeLabel(test.scheduledAt)}`}</Text>
-          <Text style={styles.meta}>{`${formatDuration(test.durationMinutes)} | ${test.subject} | ${test.batchId ?? 'Open access'}`}</Text>
+          <Text style={styles.meta}>{`${formatDuration(test.durationMinutes)} | ${test.subject} | ${
+            test.isOpenForAll || test.accessMode === 'OPEN_FOR_ALL' || !test.batchId || test.batchId === 'ALL'
+              ? 'Open for All'
+              : test.batchId
+          }`}</Text>
           <Text style={styles.meta}>
             {testActive
               ? 'Students can enter this paper now.'

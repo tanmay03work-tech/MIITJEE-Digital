@@ -1,4 +1,4 @@
-declare const __dirname: string;
+import { describe, test, expect } from '@jest/globals';
 
 describe('Navigator Batch MIITJEE Question Paper & Option Selection Disambiguation Tests', () => {
   // Helper for option selection matching

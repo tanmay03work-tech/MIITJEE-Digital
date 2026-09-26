@@ -11,6 +11,7 @@ import { EmptyState } from '../../components/common/EmptyState';
 import { InputField } from '../../components/common/InputField';
 import { Screen } from '../../components/common/Screen';
 import { uploadExamAsset } from '../../services/api/storage';
+import { fetchBatches } from '../../services/api/content';
 import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
 import { colors, radius, spacing } from '../../theme';
@@ -103,7 +104,7 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
   const [primarySubject, setPrimarySubject] = useState('Physics');
   const [durationMinutes, setDurationMinutes] = useState('60');
   const [type, setType] = useState<TestType>('weekly');
-  const [batchId, setBatchId] = useState<string | undefined>(batches[0]?.id);
+  const [batchId, setBatchId] = useState<string | undefined>(batches[0]?.id || 'JEE_2026');
   const [scheduleDate, setScheduleDate] = useState(() => toDateInputValue());
   const [scheduleTime, setScheduleTime] = useState(() => toTimeInputValue());
   const [isDatePickerVisible, setIsDatePickerVisible] = useState(false);
@@ -127,6 +128,17 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
     [questions],
   );
   const listBottomInset = 120 + Math.max(insets.bottom, spacing.sm);
+
+  React.useEffect(() => {
+    if (batches.length === 0) {
+      void fetchBatches().then((loaded) => {
+        if (loaded && loaded.length > 0) {
+          useAppStore.setState({ batches: loaded });
+          setBatchId((prev) => prev || loaded[0]?.id || 'JEE_2026');
+        }
+      });
+    }
+  }, [batches.length]);
 
   React.useEffect(() => {
     async function checkForDraft() {
@@ -237,6 +249,16 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
 
       if (queuedQuestions.length > 0) {
         startTransition(() => {
+          const subjects = new Set(queuedQuestions.map((q) => q.subjectLabel).filter(Boolean));
+          if (subjects.size > 1) {
+            setSubjectMode('multi');
+          } else if (subjects.size === 1) {
+            const singleSub = Array.from(subjects)[0];
+            if (singleSub) {
+              setPrimarySubject(singleSub);
+            }
+          }
+
           setQuestions((current) => {
             const existingQuestions = current.filter((question) => !isQuestionBlank(question));
             return [...existingQuestions, ...queuedQuestions];
@@ -325,37 +347,75 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
       return;
     }
 
-    if (type === 'weekly' && !batchId && !isOpenForAll) {
-      Alert.alert('Batch required', 'Select a batch for restricted exams or switch Access Type to Open for All.');
-      return;
-    }
+    // Weekly tests without a batch are automatically Open for All. No error is thrown.
 
     if (type === 'scholarship' && (!scholarshipAdmissionClass || !scholarshipTargetExam)) {
       Alert.alert('Scholarship audience required', 'Choose the admission class and target exam for this scholarship paper.');
       return;
     }
 
-    if (
-      questions.some((question) => {
-        if (!question.prompt.trim()) {
-          return true;
-        }
-
-        if (question.type === 'mcq') {
-          return question.options.some((option) => !option.trim());
-        }
-
-        return typeof question.integerAnswer !== 'number' || Number.isNaN(question.integerAnswer);
-      })
-    ) {
-      Alert.alert('Questions incomplete', 'Every question needs a prompt and valid answer data before publishing.');
+    const nonBlankQuestions = questions.filter((question) => !isQuestionBlank(question));
+    if (nonBlankQuestions.length === 0) {
+      Alert.alert('No questions', 'Please add at least one question before publishing.');
       return;
     }
 
-    const normalizedQuestions = questions.map((question) => ({
-      ...question,
-      subjectLabel: isMultiSubject ? question.subjectLabel?.trim() || undefined : primarySubject,
-    }));
+    const validationErrors: string[] = [];
+    const normalizedQuestions: CreateTestQuestionPayload[] = nonBlankQuestions.map((question, index) => {
+      const qNum = index + 1;
+      let prompt = question.prompt.trim();
+      if (!prompt) {
+        if (question.imageUrl) {
+          prompt = 'Refer to the question diagram below.';
+        } else {
+          validationErrors.push(`Question ${qNum}: Question prompt or image is missing.`);
+        }
+      }
+
+      if (question.type === 'mcq') {
+        let opts = (question.options || []).map((option) => option.trim());
+        const allBlank = opts.every((opt) => !opt);
+        if (allBlank) {
+          opts = ['(A)', '(B)', '(C)', '(D)'];
+        } else {
+          opts = opts.map((opt, optIndex) => opt || `(${String.fromCharCode(65 + optIndex)})`);
+        }
+        while (opts.length < 4) {
+          opts.push(`(${String.fromCharCode(65 + opts.length)})`);
+        }
+
+        const correctIdx = Math.max(0, Math.min(question.correctOptionIndex ?? 0, opts.length - 1));
+
+        return {
+          ...question,
+          prompt,
+          type: 'mcq' as const,
+          options: opts,
+          correctOptionIndex: correctIdx,
+          integerAnswer: undefined,
+          subjectLabel: isMultiSubject ? question.subjectLabel?.trim() || undefined : primarySubject,
+        };
+      } else {
+        let intAns = question.integerAnswer;
+        if (typeof intAns !== 'number' || Number.isNaN(intAns)) {
+          intAns = 0;
+        }
+
+        return {
+          ...question,
+          prompt,
+          type: 'integer' as const,
+          options: ['', '', '', ''],
+          integerAnswer: intAns,
+          subjectLabel: isMultiSubject ? question.subjectLabel?.trim() || undefined : primarySubject,
+        };
+      }
+    });
+
+    if (validationErrors.length > 0) {
+      Alert.alert('Questions incomplete', validationErrors.slice(0, 3).join('\n'));
+      return;
+    }
 
     if (
       isMultiSubject &&
@@ -370,6 +430,9 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
 
     const resolvedTestSubject = isMultiSubject ? 'Mixed Subjects' : primarySubject;
 
+    const isTestOpenForAll = Boolean(isOpenForAll) || !batchId || batchId === 'ALL';
+    const resolvedBatchId = isTestOpenForAll ? undefined : (batchId || undefined);
+
     try {
       const scheduledAt = combineScheduleInputs(scheduleDate, scheduleTime);
       await createTest({
@@ -379,8 +442,8 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
         durationMinutes: resolvedDurationMinutes,
         scheduledAt,
         type,
-        batchId: type === 'weekly' ? (isOpenForAll ? (batchId || undefined) : batchId) : undefined,
-        isOpenForAll: Boolean(isOpenForAll),
+        batchId: resolvedBatchId,
+        isOpenForAll: isTestOpenForAll,
         scholarshipAdmissionClass: type === 'scholarship' ? scholarshipAdmissionClass : undefined,
         scholarshipTargetExam: type === 'scholarship' ? scholarshipTargetExam : undefined,
         questions: normalizedQuestions,
@@ -554,13 +617,15 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
             label="Integer Answer"
             placeholder="Enter the correct integer answer"
             keyboardType="numeric"
-            value={question.integerAnswer !== undefined ? String(question.integerAnswer) : ''}
-            onChangeText={(value) =>
+            value={question.integerAnswer !== undefined && !Number.isNaN(question.integerAnswer) ? String(question.integerAnswer) : ''}
+            onChangeText={(value) => {
+              const trimmed = value.trim();
+              const parsed = parseFloat(trimmed);
               updateQuestion(index, (current) => ({
                 ...current,
-                integerAnswer: Number(value),
-              }))
-            }
+                integerAnswer: trimmed === '' ? undefined : (Number.isNaN(parsed) ? undefined : parsed),
+              }));
+            }}
           />
         )}
 
@@ -734,14 +799,23 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
                   </AnimatedPressable>
                   <AnimatedPressable
                     style={[styles.choiceChip, isOpenForAll && styles.choiceChipActive]}
-                    onPress={() => setIsOpenForAll(true)}>
+                    onPress={() => {
+                      setIsOpenForAll(true);
+                      setBatchId(undefined);
+                    }}>
                     <Text style={[styles.choiceText, isOpenForAll && styles.choiceTextActive]}>Open for All</Text>
                   </AnimatedPressable>
                 </View>
 
+                {isOpenForAll ? (
+                  <Text style={styles.fileHint}>
+                    Open for All is active: Any student can take and submit this paper. No batch requirement is enforced.
+                  </Text>
+                ) : null}
+
                 {type === 'weekly' ? (
                   <>
-                    <Text style={styles.sectionLabel}>Batch {isOpenForAll ? '(Optional for Open for All)' : ''}</Text>
+                    <Text style={styles.sectionLabel}>Batch {isOpenForAll ? '(Optional - leave unselected for All Batches)' : ''}</Text>
                     <View style={styles.choiceRow}>
                       {batches.map((batch) => (
                         <AnimatedPressable

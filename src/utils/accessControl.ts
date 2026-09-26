@@ -1,32 +1,39 @@
 import { AppUser, TestItem } from '../types';
+import { isGrandTest } from '../services/api/publishedGrandTests';
 
 export function getEligibility(user: AppUser | null, test: TestItem) {
-  if (user?.role === 'admin' && user.approvalStatus === 'approved') {
+  if (user?.role === 'admin') {
     return {
       allowed: true,
       label: 'Admin Access',
-      reason: 'Approved admins can preview and attempt any published paper.',
+      reason: 'Admins can preview and attempt any published paper.',
       ctaLabel: 'Open Paper',
+    };
+  }
+
+  if (isGrandTest(test.id, test.title)) {
+    return {
+      allowed: true,
+      label: 'Open For All',
+      reason: 'This grand test is open for all students across any batch.',
+      ctaLabel: 'Start Paper',
     };
   }
 
   const isOpenForAll =
     test.isOpenForAll === true ||
     test.accessMode === 'OPEN_FOR_ALL' ||
-    (test.isOpenForAll !== false &&
-      test.accessMode !== 'RESTRICTED_BATCH' &&
-      (!test.allowedBatches || test.allowedBatches.length === 0) &&
-      (!test.batchId ||
-        test.batchId.trim() === '' ||
-        test.batchId === 'ALL' ||
-        test.batchId.toLowerCase() === 'all batches' ||
-        test.batchId.toLowerCase() === 'all'));
+    !test.batchId ||
+    test.batchId.trim() === '' ||
+    test.batchId === 'ALL' ||
+    test.batchId.toLowerCase() === 'all batches' ||
+    test.batchId.toLowerCase() === 'all';
 
   if (isOpenForAll) {
     return {
       allowed: true,
       label: 'Open For All',
-      reason: 'This paper is open for all students across any batch.',
+      reason: 'This paper is open for all students. No batch restriction.',
       ctaLabel: 'Start Paper',
     };
   }

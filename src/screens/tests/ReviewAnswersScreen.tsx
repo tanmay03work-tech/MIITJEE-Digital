@@ -11,14 +11,27 @@ import { QuestionBodyRenderer } from '../../components/tests/QuestionBodyRendere
 import { useAppStore } from '../../store/appStore';
 import { colors, radius, spacing } from '../../theme';
 import { RootStackScreenProps } from '../../navigation/types';
-import { NAVIGATOR_BATCH_TEST_ID, NAVIGATOR_BATCH_TEST_ITEM } from '../../services/api/navigatorBatchTestData';
+import {
+  BOOSTER_BATCH_TEST_ITEM,
+  isBoosterBatchTest,
+  isNavigatorBatchTest,
+  NAVIGATOR_BATCH_TEST_ITEM,
+} from '../../services/api/publishedGrandTests';
 
 export function ReviewAnswersScreen({ route }: RootStackScreenProps<'ReviewAnswers'>) {
   const { resultId, testId } = route.params;
   const loadReview = useAppStore((state) => state.loadReview);
-  const test =
-    useAppStore((state) => state.tests.find((item) => item.id === testId)) ??
-    (testId === NAVIGATOR_BATCH_TEST_ID ? NAVIGATOR_BATCH_TEST_ITEM : undefined);
+  const test = useAppStore((state) => {
+    if (isNavigatorBatchTest(testId)) return NAVIGATOR_BATCH_TEST_ITEM;
+    if (isBoosterBatchTest(testId)) return BOOSTER_BATCH_TEST_ITEM;
+    const found = state.tests.find((item) => item.id === testId);
+    if (found) {
+      if (isNavigatorBatchTest(found.id, found.title)) return NAVIGATOR_BATCH_TEST_ITEM;
+      if (isBoosterBatchTest(found.id, found.title)) return BOOSTER_BATCH_TEST_ITEM;
+      return found;
+    }
+    return undefined;
+  });
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [review, setReview] = useState<Awaited<ReturnType<typeof loadReview>>>([]);
@@ -68,8 +81,41 @@ export function ReviewAnswersScreen({ route }: RootStackScreenProps<'ReviewAnswe
       ) : (
         review.map((item, index) => {
           const isUnatt = item.isUnattempted || !item.userAnswer || item.userAnswer.trim() === '';
-          const badgeLabel = item.isCorrect ? 'Correct (+4 Marks)' : isUnatt ? 'Unattempted (0 Marks)' : 'Incorrect (-1 Mark)';
-          const badgeTone: 'success' | 'warning' | 'danger' = item.isCorrect ? 'success' : isUnatt ? 'warning' : 'danger';
+
+          let isActuallyCorrect = Boolean(item.isCorrect);
+          if (!isActuallyCorrect && !isUnatt) {
+            const normUser = (item.userAnswer || '').trim().replace(/^Option\s+/i, '');
+            const normCorrect = (item.correctAnswer || '').trim().replace(/^Option\s+/i, '');
+
+            if (normUser.toLowerCase() === normCorrect.toLowerCase()) {
+              isActuallyCorrect = true;
+            } else if (/^[A-D]$/i.test(normUser) && item.options && item.options.length > 0) {
+              const userOptIndex = normUser.toUpperCase().charCodeAt(0) - 65;
+              const userOptText = (item.options[userOptIndex] || '').trim();
+              if (userOptText.toLowerCase() === normCorrect.toLowerCase()) {
+                isActuallyCorrect = true;
+              }
+            } else if (/^[A-D]$/i.test(normCorrect) && item.options && item.options.length > 0) {
+              const corrOptIndex = normCorrect.toUpperCase().charCodeAt(0) - 65;
+              const corrOptText = (item.options[corrOptIndex] || '').trim();
+              if (corrOptText.toLowerCase() === normUser.toLowerCase()) {
+                isActuallyCorrect = true;
+              }
+            } else if (!isNaN(Number(normUser)) && !isNaN(Number(normCorrect)) && Number(normUser) === Number(normCorrect)) {
+              isActuallyCorrect = true;
+            }
+          }
+
+          const badgeLabel = isActuallyCorrect
+            ? 'Correct (+4 Marks)'
+            : isUnatt
+            ? 'Unattempted (0 Marks)'
+            : 'Incorrect (-1 Mark)';
+          const badgeTone: 'success' | 'warning' | 'danger' = isActuallyCorrect
+            ? 'success'
+            : isUnatt
+            ? 'warning'
+            : 'danger';
 
           return (
             <Card key={item.questionId} style={styles.reviewCard}>
@@ -102,7 +148,12 @@ export function ReviewAnswersScreen({ route }: RootStackScreenProps<'ReviewAnswe
                     return (
                       <View
                         key={`${item.questionId}_${optionIndex}`}
-                        style={[styles.optionRow, isCorrect && styles.optionCorrect, isUser && !isCorrect && styles.optionIncorrect]}>
+                        style={[
+                          styles.optionRow,
+                          isCorrect && styles.optionCorrect,
+                          isUser && !isCorrect && styles.optionIncorrect,
+                          isUser && isCorrect && styles.optionCorrect,
+                        ]}>
                         <Text style={styles.optionText}>{option}</Text>
                         {isCorrect ? <CheckCircle2 size={18} color={colors.accent} /> : null}
                         {isUser && !isCorrect ? <XCircle size={18} color={colors.danger} /> : null}

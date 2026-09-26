@@ -27,6 +27,7 @@ import {
   createQuestionSet,
   deleteQuestionSet,
   fetchActivityLogs,
+  invalidateAdminCache,
 } from '../services/api/admin';
 import { fetchBatches, fetchCourses } from '../services/api/content';
 import {
@@ -122,7 +123,7 @@ interface AppState {
   loadActivityLogs: (options?: { category?: string; userId?: string; limit?: number; offset?: number }) => Promise<ActivityLogEntry[]>;
   loadLeaderboard: (payload?: { scope?: LeaderboardScope; batchId?: string | null; testId?: string }) => Promise<LeaderboardEntry[]>;
   loadStudentInsights: (userId?: string) => Promise<StudentInsights>;
-  loadQuestions: (testId: string) => Promise<TestQuestion[]>;
+  loadQuestions: (testId: string, testTitle?: string) => Promise<TestQuestion[]>;
   loadReview: (resultId: string) => Promise<TestAttemptReviewItem[]>;
   loadQuestionBankSets: (force?: boolean) => Promise<QuestionBankSet[]>;
   loadQuestionSetQuestions: (setId: number) => Promise<QuestionBankQuestion[]>;
@@ -133,6 +134,7 @@ interface AppState {
   deselectAllQuestionBankQuestions: (questions: QuestionBankQuestion[]) => void;
   clearQuestionBankSelection: () => void;
   queueSelectedQuestionBankQuestions: () => CreateTestPayload['questions'];
+  queueDraftQuestions: (questions: CreateTestPayload['questions']) => void;
   consumePendingQuestionBankImport: () => CreateTestPayload['questions'];
   importQuestionsFromPdf: (payload: PdfImportPayload) => Promise<
     PdfImportResponse & { draftQuestions: CreateTestPayload['questions'] }
@@ -215,20 +217,52 @@ async function withFallback<T>(loader: () => Promise<T>, fallback: T) {
 }
 
 function mapQuestionBankQuestionToDraft(question: QuestionBankQuestion): CreateTestPayload['questions'][number] {
-  const normalizedPrompt = normalizeExamText(question.question);
-  const normalizedOptions = question.type === 'mcq' ? question.options.map((option) => normalizeExamText(option)) : ['', '', '', ''];
-  const normalizedCorrectAnswer = normalizeExamText(question.correctAnswer);
-  const correctOptionIndex =
+  let normalizedPrompt = normalizeExamText(question.question);
+  if (!normalizedPrompt.trim() && question.imageUrl) {
+    normalizedPrompt = 'Refer to the question diagram below.';
+  }
+
+  let normalizedOptions =
     question.type === 'mcq'
-      ? Math.max(0, normalizedOptions.findIndex((option) => option === normalizedCorrectAnswer))
-      : 0;
+      ? (question.options || []).map((option) => normalizeExamText(option))
+      : ['', '', '', ''];
+
+  if (question.type === 'mcq') {
+    if (normalizedOptions.length === 0 || normalizedOptions.every((opt) => !opt.trim())) {
+      normalizedOptions = ['(A)', '(B)', '(C)', '(D)'];
+    } else {
+      normalizedOptions = normalizedOptions.map((opt, i) => opt.trim() || `(${String.fromCharCode(65 + i)})`);
+      while (normalizedOptions.length < 4) {
+        normalizedOptions.push(`(${String.fromCharCode(65 + normalizedOptions.length)})`);
+      }
+    }
+  }
+
+  let correctOptionIndex = 0;
+  if (question.type === 'mcq') {
+    const ans = (question.correctAnswer || '').trim().toUpperCase();
+    if (ans === 'A' || ans === '1') correctOptionIndex = 0;
+    else if (ans === 'B' || ans === '2') correctOptionIndex = 1;
+    else if (ans === 'C' || ans === '3') correctOptionIndex = 2;
+    else if (ans === 'D' || ans === '4') correctOptionIndex = 3;
+    else {
+      const foundIdx = normalizedOptions.findIndex((opt) => opt.trim().toLowerCase() === ans.toLowerCase());
+      if (foundIdx !== -1) correctOptionIndex = foundIdx;
+    }
+  }
+
+  let integerAnswer: number | undefined = undefined;
+  if (question.type === 'integer') {
+    const parsed = parseFloat(question.correctAnswer || '0');
+    integerAnswer = Number.isNaN(parsed) ? 0 : parsed;
+  }
 
   return {
     type: question.type,
     prompt: normalizedPrompt,
     options: normalizedOptions,
     correctOptionIndex,
-    integerAnswer: question.type === 'integer' ? Number(question.correctAnswer) : undefined,
+    integerAnswer,
     explanation: '',
     imageUrl: question.imageUrl ?? null,
     subjectLabel: '',
@@ -306,10 +340,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         useAuthStore.getState().setUser(refreshedSignedInUser);
       }
 
+      const currentResults = get().results;
+      const mergedResults = [
+        ...results,
+        ...currentResults.filter((local) => !results.some((r) => r.id === local.id)),
+      ];
+
       set({
         batches,
         tests,
-        results,
+        results: mergedResults,
         users:
           refreshedCurrentUser?.role === 'admin' && refreshedCurrentUser.approvalStatus === 'approved'
             ? get().users
@@ -441,13 +481,19 @@ export const useAppStore = create<AppState>((set, get) => ({
         withFallback(() => fetchReattemptRequests(), get().reattemptRequests),
       ])
         .then(([autoSubmitEvents, violationAnalytics, enrollmentQueries, scholarshipRegistrations, enquiries, results, reattemptRequests]) => {
+          const currentResults = get().results;
+          const mergedResults = [
+            ...results,
+            ...currentResults.filter((local) => !results.some((r) => r.id === local.id)),
+          ];
+
           set({
             autoSubmitEvents,
             violationAnalytics,
             enrollmentQueries,
             scholarshipRegistrations,
             enquiries,
-            results,
+            results: mergedResults,
             reattemptRequests,
             adminDataFetchedAt: Date.now(),
           });
@@ -542,13 +588,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ studentInsights: insights, studentInsightsFetchedAt: now });
     return insights;
   },
-  loadQuestions: async (testId) => {
+  loadQuestions: async (testId, testTitle) => {
     const cached = get().questionCache[testId];
-    if (cached && cached.length > 0) {
+    const hasDraftIds = cached && cached.some((q) => q.id.includes('_draft_'));
+    if (cached && cached.length > 0 && !hasDraftIds) {
       return cached;
     }
 
-    const questions = await fetchQuestions(testId);
+    const testMatch = get().tests.find((t) => t.id === testId);
+    const resolvedTitle = testTitle || testMatch?.title;
+    const questions = await fetchQuestions(testId, resolvedTitle);
     if (questions && questions.length > 0) {
       set((state) => ({
         questionCache: {
@@ -645,12 +694,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     }),
   clearQuestionBankSelection: () => set({ questionBankSelection: [] }),
   queueSelectedQuestionBankQuestions: () => {
-    const queued = get().questionBankSelection.map(mapQuestionBankQuestionToDraft);
+    const sorted = [...get().questionBankSelection].sort((a, b) => Number(a.id) - Number(b.id));
+    const queued = sorted.map(mapQuestionBankQuestionToDraft);
     set({
       pendingQuestionBankImport: queued,
       questionBankSelection: [],
     });
     return queued;
+  },
+  queueDraftQuestions: (questions) => {
+    set({ pendingQuestionBankImport: questions });
   },
   consumePendingQuestionBankImport: () => {
     const queued = get().pendingQuestionBankImport;
@@ -672,6 +725,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         status: 'success',
         score: response.result.score,
       });
+
+      invalidateAdminCache();
 
       if (response.user && signedInUser?.id === response.user.id) {
         useAuthStore.getState().setUser(response.user);
@@ -768,27 +823,18 @@ export const useAppStore = create<AppState>((set, get) => ({
       targetName: test.title,
     });
 
-    const questions = payload.questions.map((question, index) => ({
-      id: `${test.id}_draft_${index + 1}`,
-      testId: test.id,
-      type: question.type,
-      prompt: question.prompt,
-      options: question.type === 'mcq' ? question.options : [],
-      correctAnswer:
-        question.type === 'integer'
-          ? String(question.integerAnswer ?? '')
-          : question.options[question.correctOptionIndex] ?? question.options[0] ?? '',
-      integerAnswer: question.integerAnswer,
-      explanation: question.explanation,
-      imageUrl: question.imageUrl,
-      subjectLabel: question.subjectLabel,
-    }));
+    let questions: TestQuestion[] = [];
+    try {
+      questions = await fetchQuestions(test.id, test.title);
+    } catch {
+      questions = [];
+    }
 
     set((state) => ({
       tests: [test, ...state.tests],
       questionCache: {
         ...state.questionCache,
-        [test.id]: questions,
+        ...(questions.length > 0 ? { [test.id]: questions } : {}),
       },
     }));
 

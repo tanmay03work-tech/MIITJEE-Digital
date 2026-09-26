@@ -22,20 +22,17 @@ import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
 import { useTestSessionStore } from '../../store/testSessionStore';
 import { colors, radius, spacing } from '../../theme';
-import { TestItem } from '../../types';
+import { TestItem, TestQuestion } from '../../types';
 import { getEligibility } from '../../utils/accessControl';
 import { formatExamTextForDisplay } from '../../utils/examText';
 import { formatClock } from '../../utils/formatters';
 import { getTestLockedMessage } from '../../utils/testAvailability';
-import * as pdfjsLib from 'pdfjs-dist';
-import { extractPdfPagesMetadata } from '../../services/pdf-native/pdfNativeParser';
-import { getPdfDocument } from '../../services/pdf-native/pdfDocumentCache';
-import { getPdfNativeTestById } from '../../services/pdf-native/pdfNativeTestService';
-import { mapPdfNativeTestToCbtTestItem, fetchPdfNativeCbtQuestions } from '../../services/pdf-native/pdfNativeCbtAdapter';
-import { PdfNativeQuestion } from '../../services/pdf-native/pdfNativeTypes';
-import { PdfNativePreview } from '../admin/PdfNativeTestBuilder/PdfNativePreview';
-import { NAVIGATOR_BATCH_TEST_ID, NAVIGATOR_BATCH_TEST_ITEM } from '../../services/api/navigatorBatchTestData';
-
+import {
+  BOOSTER_BATCH_TEST_ITEM,
+  isBoosterBatchTest,
+  isNavigatorBatchTest,
+  NAVIGATOR_BATCH_TEST_ITEM,
+} from '../../services/api/publishedGrandTests';
 const MAX_WARNINGS = 3;
 const AUTO_SUBMIT_THRESHOLD = 4;
 const VIOLATION_DEBOUNCE_MS = 2000;
@@ -106,15 +103,22 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
   const [isSessionReady, setIsSessionReady] = useState(false);
   const [warningMessage, setWarningMessage] = useState<string>();
   const [violationCount, setViolationCount] = useState(0);
-  const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
 
   const user = useAuthStore((state) => state.user);
   const loadQuestions = useAppStore((state) => state.loadQuestions);
   const submitAttempt = useAppStore((state) => state.submitAttempt);
   const isSubmitting = useAppStore((state) => state.isSubmitting);
-  const testFromStore =
-    useAppStore((state) => state.tests.find((candidate) => candidate.id === testId)) ??
-    (testId === NAVIGATOR_BATCH_TEST_ID ? NAVIGATOR_BATCH_TEST_ITEM : undefined);
+  const testFromStore = useAppStore((state) => {
+    if (isNavigatorBatchTest(testId)) return NAVIGATOR_BATCH_TEST_ITEM;
+    if (isBoosterBatchTest(testId)) return BOOSTER_BATCH_TEST_ITEM;
+    const found = state.tests.find((candidate) => candidate.id === testId);
+    if (found) {
+      if (isNavigatorBatchTest(found.id, found.title)) return NAVIGATOR_BATCH_TEST_ITEM;
+      if (isBoosterBatchTest(found.id, found.title)) return BOOSTER_BATCH_TEST_ITEM;
+      return found;
+    }
+    return undefined;
+  });
   const [resolvedTest, setResolvedTest] = useState<TestItem | undefined>(testFromStore);
   const test = testFromStore || resolvedTest;
 
@@ -185,17 +189,6 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
 
       if (!activeTest) {
         try {
-          const pdfTest = await getPdfNativeTestById(testId);
-          if (pdfTest) {
-            activeTest = mapPdfNativeTestToCbtTestItem(pdfTest);
-          }
-        } catch {
-          // Ignore
-        }
-      }
-
-      if (!activeTest) {
-        try {
           const allTests = await fetchTests();
           const match = allTests.find((candidate: TestItem) => candidate.id === testId);
           if (match) {
@@ -218,6 +211,7 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
       }
 
       const testEligibility = getEligibility(user, activeTest);
+
       if (!testEligibility?.allowed) {
         if (isMounted) {
           setSessionError('You are not eligible to attempt this test.');
@@ -226,68 +220,47 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
       }
 
       try {
-        setSessionError(undefined);
-        setIsSessionReady(false);
+        if (isMounted) {
+          setSessionError(undefined);
+          setIsSessionReady(false);
+        }
+
         const isRetake = Boolean(route.params?.studentName);
         if (!isRetake) {
-          const existingAttempt = await fetchExistingAttemptForTest(activeTest.id, user?.id);
-          if (existingAttempt) {
-            navigation.replace('TestResult', {
-              testId: activeTest.id,
-              resultId: existingAttempt.id,
-            });
-            return;
-          }
-        }
-
-        let fetchedQuestions = await loadQuestions(activeTest.id);
-
-        if (!fetchedQuestions || fetchedQuestions.length === 0) {
           try {
-            const fallbackQs = await fetchPdfNativeCbtQuestions(activeTest.id);
-            if (fallbackQs && fallbackQs.length > 0) {
-              fetchedQuestions = fallbackQs;
+            const existingAttempt = await fetchExistingAttemptForTest(activeTest.id, user?.id);
+            if (existingAttempt) {
+              navigation.replace('TestResult', {
+                testId: activeTest.id,
+                resultId: existingAttempt.id,
+              });
+              return;
             }
           } catch {
-            // Ignore
+            // Ignore existing attempt lookup error
           }
         }
 
-        if (!isMounted) {
-          return;
+        let fetchedQuestions: TestQuestion[] = [];
+        try {
+          fetchedQuestions = await loadQuestions(activeTest.id, activeTest.title);
+        } catch {
+          fetchedQuestions = [];
         }
 
         if (!fetchedQuestions || fetchedQuestions.length === 0) {
-          setSessionError('No questions were available for this test.');
-          return;
-        }
-
-        // If any question or test is PDF-Native, load and cache the PDF document proxy client-side for region rendering
-        const hasPdfNativeQuestion =
-          Boolean(activeTest.isPdfNative) ||
-          Boolean(testId && (testId.startsWith('pdf_') || testId.startsWith('set_') || testId.includes('pdf_test_'))) ||
-          fetchedQuestions.some((q) => q.pdfNativeBbox || (q.pdfNativeRegions && q.pdfNativeRegions.length > 0) || q.pdfUrl || q.pdfId);
-
-        if (hasPdfNativeQuestion) {
-          try {
-            const firstQ = fetchedQuestions.find((q) => q.pdfUrl || q.pdfId);
-            const resolvedPdfId = firstQ?.pdfId || (activeTest as any)?.pdfId || (activeTest as any)?.source_pdf_id;
-            const resolvedPdfUrl = firstQ?.pdfUrl || (activeTest as any)?.pdfUrl;
-            if (resolvedPdfId || resolvedPdfUrl) {
-              const doc = await getPdfDocument({
-                pdfId: resolvedPdfId,
-                pdfUrl: resolvedPdfUrl,
-              });
-              if (isMounted) setPdfDoc(doc);
-            }
-          } catch (pdfErr) {
-            console.warn('[CBT PDF LOAD] Unable to load PDF document for CBT region rendering:', pdfErr);
+          if (isMounted) {
+            setSessionError('No questions were available for this test.');
           }
+          return;
         }
 
         const resolvedStudentName = route.params?.studentName || useTestSessionStore.getState().studentName || user?.fullName || 'Student';
         startSession(activeTest, fetchedQuestions, resolvedStudentName);
-        setIsSessionReady(true);
+        if (isMounted) {
+          setIsSessionReady(true);
+          setSessionError(undefined);
+        }
       } catch (error) {
         if (!isMounted) {
           return;
@@ -302,7 +275,7 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
           normalizedMessage.includes('scheduled time') ||
           normalizedMessage.includes('have patience')
         ) {
-          Alert.alert('Paper locked', test ? getTestLockedMessage(test) : message);
+          Alert.alert('Paper locked', activeTest ? getTestLockedMessage(activeTest) : message);
           navigation.goBack();
           return;
         }
@@ -316,7 +289,7 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
     return () => {
       isMounted = false;
     };
-  }, [eligibility?.allowed, loadQuestions, startSession, test]);
+  }, [testId, route.params?.studentName]);
 
   useEffect(() => {
     if (!isSessionReady) {
@@ -382,11 +355,12 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
             user?.fullName ||
             'Student';
           const activeUserId = user?.id || 'guest_user';
+          const liveAnswers = useTestSessionStore.getState().answers;
 
           const response = await submitAttempt({
             testId: test.id,
             userId: activeUserId,
-            answers,
+            answers: liveAnswers,
             studentName: activeStudentName,
           });
 
@@ -401,11 +375,11 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
           void activityLog.flush();
 
           await clearViolationState();
-          reset();
           navigation.replace('TestResult', {
             testId: test.id,
             resultId: response.result.id,
           });
+          reset();
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Please try again.';
 
@@ -413,11 +387,11 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
             const existingAttempt = await fetchExistingAttemptForTest(test.id, user?.id);
             if (existingAttempt) {
               await clearViolationState();
-              reset();
               navigation.replace('TestResult', {
                 testId: test.id,
                 resultId: existingAttempt.id,
               });
+              reset();
               return;
             }
           }
@@ -622,64 +596,6 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
   const currentQuestionPrompt = currentQuestion ? formatExamTextForDisplay(currentQuestion.prompt) : '';
   const questionIds = useMemo(() => questions.map((question: { id: string }) => question.id), [questions]);
 
-  const isPdfExam = useMemo(() => {
-    return (
-      Boolean(test?.isPdfNative) ||
-      Boolean(testId && (testId.startsWith('pdf_') || testId.startsWith('set_') || testId.includes('pdf_test_'))) ||
-      questions.some(
-        (q) =>
-          !!q.pdfNativeBbox ||
-          (!!q.pdfNativeRegions && q.pdfNativeRegions.length > 0) ||
-          !!q.pdfUrl ||
-          !!q.pdfId
-      )
-    );
-  }, [test?.isPdfNative, testId, questions]);
-
-  // Stable memoized question object for PDF-Native rendering
-  const pdfNativeQuestion = useMemo<PdfNativeQuestion | null>(() => {
-    if (!currentQuestion) return null;
-    const isPdf =
-      isPdfExam ||
-      !!currentQuestion.pdfNativeBbox ||
-      (!!currentQuestion.pdfNativeRegions && currentQuestion.pdfNativeRegions.length > 0) ||
-      !!currentQuestion.pdfUrl ||
-      !!currentQuestion.pdfId;
-
-    if (!isPdf) return null;
-
-    const rawBbox =
-      currentQuestion.pdfNativeBbox ||
-      currentQuestion.pdfNativeRegions?.[0]?.bbox ||
-      { x: 0, y: 0, width: 300, height: 150 };
-
-    return {
-      id: currentQuestion.id,
-      pdf_id: currentQuestion.pdfId || test?.pdfId || 'ref',
-      pdf_url: currentQuestion.pdfUrl || (test as any)?.pdfUrl || '',
-      question_number: String(currentIndex + 1),
-      page_start: currentQuestion.pdfNativePage || 1,
-      page_end:
-        currentQuestion.pdfNativeRegions && currentQuestion.pdfNativeRegions.length > 0
-          ? currentQuestion.pdfNativeRegions[currentQuestion.pdfNativeRegions.length - 1]!.pageNumber
-          : currentQuestion.pdfNativePage || 1,
-      bbox: rawBbox,
-      regions: currentQuestion.pdfNativeRegions,
-      subject: (currentQuestion.subjectLabel || test?.subject || 'Physics') as any,
-      question_type: currentQuestion.type === 'integer' ? 'INTEGER' : 'MCQ',
-      correct_answer: null,
-      marks: 4,
-      negative_marks: 1,
-      review_status: 'APPROVED',
-    };
-  }, [
-    currentQuestion,
-    currentIndex,
-    isPdfExam,
-    test?.pdfId,
-    test?.subject,
-  ]);
-
   const handleTogglePalette = useCallback(() => {
     setPaletteVisible((current) => !current);
   }, []);
@@ -711,7 +627,7 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
       if (!currentQuestionId) {
         return;
       }
-      const sanitized = value.replace(/[^0-9-]/g, '');
+      const sanitized = value.replace(/[^0-9.-]/g, '');
       if (!sanitized) {
         clearResponse(currentQuestionId);
         return;
@@ -743,13 +659,6 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
       return null;
     }
 
-    const isPdfQuestion =
-      isPdfExam ||
-      !!currentQuestion.pdfNativeBbox ||
-      (!!currentQuestion.pdfNativeRegions && currentQuestion.pdfNativeRegions.length > 0) ||
-      !!currentQuestion.pdfUrl ||
-      !!currentQuestion.pdfId;
-
     return (
       <Card style={styles.questionCard}>
         <View style={styles.questionHeader}>
@@ -776,146 +685,72 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
           <Text style={styles.questionMeta}>{unansweredCount} left unanswered</Text>
         </View>
 
-        {isPdfExam || isPdfQuestion ? (
-          /* ============= PDF-NATIVE EXAM (ONLY ORIGINAL PDF REGION) ============= */
-          <View style={styles.pdfNativeSection}>
-            {/* 1. Original PDF Region View (Immutable Visual Source of Truth) */}
-            <View style={styles.pdfFrame}>
-              <PdfNativePreview
-                pdfDoc={pdfDoc}
-                pdfUrl={currentQuestion.pdfUrl || pdfNativeQuestion?.pdf_url || (test as any)?.pdfUrl}
-                question={pdfNativeQuestion}
-                showAdminDebug={false}
-                onRetrySuccess={(newDoc) => setPdfDoc(newDoc)}
-              />
-            </View>
+        <QuestionBodyRenderer
+          prompt={currentQuestion.prompt}
+          imageUrl={currentQuestion.imageUrl}
+        />
 
-            {/* 2. Answer Selection Interaction (A, B, C, D or Numeric Input) */}
-            {currentQuestion.type === 'integer' ? (
-              <View style={styles.integerCard}>
-                <View style={styles.integerHeaderRow}>
-                  <Text style={styles.integerLabel}>Enter numerical answer:</Text>
-                  {selectedAnswer ? (
-                    <TouchableOpacity onPress={handleClearResponse} style={styles.clearMiniBtn}>
-                      <X size={13} color={colors.danger} />
-                      <Text style={styles.clearMiniText}>Clear</Text>
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
-                <TextInput
-                  keyboardType="numeric"
-                  value={selectedAnswer ?? ''}
-                  onChangeText={handleIntegerChange}
-                  placeholder="Type your numerical answer"
-                  placeholderTextColor={colors.textSubtle}
-                  style={styles.integerInput}
-                />
-              </View>
-            ) : (
-              <View style={styles.answerBubbleStrip}>
-                <View style={styles.bubbleHeaderRow}>
-                  <Text style={styles.answerStripLabel}>Select Answer Option:</Text>
-                  {selectedAnswer ? (
-                    <TouchableOpacity
-                      style={styles.clearBubbleBtn}
-                      onPress={handleClearResponse}
-                    >
-                      <X size={13} color={colors.danger} />
-                      <Text style={styles.clearBubbleText}>Unselect ({selectedAnswer.replace(/^Option\s*/i, '')})</Text>
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
-                <View style={styles.bubbleRow}>
-                  {['A', 'B', 'C', 'D'].map((opt) => {
-                    const isSelected = selectedAnswer === opt || selectedAnswer === `Option ${opt}`;
-                    return (
-                      <TouchableOpacity
-                        key={opt}
-                        style={[styles.bubbleBtn, isSelected && styles.bubbleBtnSelected]}
-                        onPress={() => handleSelectAnswer(opt)}
-                        activeOpacity={0.7}
-                      >
-                        <Text style={[styles.bubbleText, isSelected && styles.bubbleTextSelected]}>
-                          ({opt})
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-            )}
+        {currentQuestion.type === 'integer' ? (
+          <View style={styles.integerCard}>
+            <View style={styles.integerHeaderRow}>
+              <Text style={styles.integerLabel}>Enter integer/numerical answer</Text>
+              {selectedAnswer ? (
+                <TouchableOpacity onPress={handleClearResponse} style={styles.clearMiniBtn}>
+                  <X size={13} color={colors.danger} />
+                  <Text style={styles.clearMiniText}>Clear</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+            <TextInput
+              keyboardType="numeric"
+              value={selectedAnswer ?? ''}
+              onChangeText={handleIntegerChange}
+              placeholder="Type your answer"
+              placeholderTextColor={colors.textSubtle}
+              style={styles.integerInput}
+            />
           </View>
         ) : (
-          /* ============= STANDARD CBT QUESTION RENDERING (NON-PDF-NATIVE ONLY) ============= */
-          <>
-            <QuestionBodyRenderer
-              prompt={currentQuestion.prompt}
-              imageUrl={currentQuestion.imageUrl}
-            />
+          <View style={styles.optionList}>
+            {currentQuestion.options.map((option: string, optionIndex: number) => {
+              const badgeLetter = String.fromCharCode(65 + optionIndex);
+              const normSelected = (selectedAnswer || '').trim().replace(/^Option\s+/i, '');
+              const isSingleLetter = /^[A-D]$/i.test(normSelected);
 
-            {currentQuestion.type === 'integer' ? (
-              <View style={styles.integerCard}>
-                <View style={styles.integerHeaderRow}>
-                  <Text style={styles.integerLabel}>Enter integer answer</Text>
-                  {selectedAnswer ? (
-                    <TouchableOpacity onPress={handleClearResponse} style={styles.clearMiniBtn}>
-                      <X size={13} color={colors.danger} />
-                      <Text style={styles.clearMiniText}>Clear</Text>
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
-                <TextInput
-                  keyboardType="numeric"
-                  value={selectedAnswer ?? ''}
-                  onChangeText={handleIntegerChange}
-                  placeholder="Type your answer"
-                  placeholderTextColor={colors.textSubtle}
-                  style={styles.integerInput}
+              const isOptionSelected = isSingleLetter
+                ? normSelected.toUpperCase() === badgeLetter
+                : Boolean(normSelected) &&
+                  (normSelected.toLowerCase() === option.trim().toLowerCase() ||
+                    normSelected.toUpperCase() === badgeLetter);
+
+              return (
+                <OptionCard
+                  key={`${currentQuestion.id}_${optionIndex}`}
+                  badgeLabel={badgeLetter}
+                  label={option}
+                  selected={isOptionSelected}
+                  onPress={() => {
+                    if (isOptionSelected) {
+                      handleClearResponse();
+                    } else {
+                      handleSelectAnswer(badgeLetter);
+                    }
+                  }}
+                  imageUrl={currentQuestion.optionImageUrls?.[optionIndex]}
                 />
-              </View>
-            ) : (
-              <View style={styles.optionList}>
-                {currentQuestion.options.map((option: string, optionIndex: number) => {
-                  const badgeLetter = String.fromCharCode(65 + optionIndex);
-                  const normSelected = (selectedAnswer || '').trim().replace(/^Option\s+/i, '');
-                  const isSingleLetter = /^[A-D]$/i.test(normSelected);
-
-                  const isOptionSelected = isSingleLetter
-                    ? normSelected.toUpperCase() === badgeLetter
-                    : Boolean(normSelected) &&
-                      (normSelected.toLowerCase() === option.trim().toLowerCase() ||
-                        normSelected.toUpperCase() === badgeLetter);
-
-                  return (
-                    <OptionCard
-                      key={`${currentQuestion.id}_${optionIndex}`}
-                      badgeLabel={badgeLetter}
-                      label={option}
-                      selected={isOptionSelected}
-                      onPress={() => {
-                        if (isOptionSelected) {
-                          handleClearResponse();
-                        } else {
-                          handleSelectAnswer(badgeLetter);
-                        }
-                      }}
-                      imageUrl={currentQuestion.optionImageUrls?.[optionIndex]}
-                    />
-                  );
-                })}
-                {selectedAnswer ? (
-                  <TouchableOpacity
-                    style={styles.clearResponseInlineBtn}
-                    onPress={handleClearResponse}
-                    activeOpacity={0.7}
-                  >
-                    <X size={14} color={colors.danger} />
-                    <Text style={styles.clearResponseInlineText}>Unselect / Clear Response</Text>
-                  </TouchableOpacity>
-                ) : null}
-              </View>
-            )}
-          </>
+              );
+            })}
+            {selectedAnswer ? (
+              <TouchableOpacity
+                style={styles.clearResponseInlineBtn}
+                onPress={handleClearResponse}
+                activeOpacity={0.7}
+              >
+                <X size={14} color={colors.danger} />
+                <Text style={styles.clearResponseInlineText}>Unselect / Clear Response</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
         )}
       </Card>
     );
@@ -927,15 +762,10 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
     handleToggleFlag,
     currentIndex,
     unansweredCount,
-    isPdfExam,
-    pdfNativeQuestion,
-    pdfDoc,
-    test,
     selectedAnswer,
     handleClearResponse,
     handleIntegerChange,
     handleSelectAnswer,
-    currentQuestionPrompt,
   ]);
 
   if (sessionError) {

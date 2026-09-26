@@ -27,14 +27,26 @@ import { updateRows } from '../../services/supabase/client';
 import { getTestLockedMessage, getTestStatusLabel, isTestActive } from '../../utils/testAvailability';
 import { fetchExistingAttemptForTest } from '../../services/api/tests';
 import { fetchReattemptStatusForTest, submitReattemptRequest } from '../../services/api/reattemptRequests';
-
-import { NAVIGATOR_BATCH_TEST_ID, NAVIGATOR_BATCH_TEST_ITEM } from '../../services/api/navigatorBatchTestData';
+import {
+  BOOSTER_BATCH_TEST_ITEM,
+  isBoosterBatchTest,
+  isNavigatorBatchTest,
+  NAVIGATOR_BATCH_TEST_ITEM,
+} from '../../services/api/publishedGrandTests';
 
 export function TestIntroScreen({ route, navigation }: RootStackScreenProps<'TestIntro'>) {
   const { testId } = route.params;
-  const test =
-    useAppStore((state) => state.tests.find((candidate) => candidate.id === testId)) ??
-    (testId === NAVIGATOR_BATCH_TEST_ID ? NAVIGATOR_BATCH_TEST_ITEM : undefined);
+  const test = useAppStore((state) => {
+    if (isNavigatorBatchTest(testId)) return NAVIGATOR_BATCH_TEST_ITEM;
+    if (isBoosterBatchTest(testId)) return BOOSTER_BATCH_TEST_ITEM;
+    const found = state.tests.find((candidate) => candidate.id === testId);
+    if (found) {
+      if (isNavigatorBatchTest(found.id, found.title)) return NAVIGATOR_BATCH_TEST_ITEM;
+      if (isBoosterBatchTest(found.id, found.title)) return BOOSTER_BATCH_TEST_ITEM;
+      return found;
+    }
+    return undefined;
+  });
   const user = useAuthStore((state) => state.user);
   const questionCache = useAppStore((state) => state.questionCache);
   const tests = useAppStore((state) => state.tests);
@@ -114,8 +126,14 @@ export function TestIntroScreen({ route, navigation }: RootStackScreenProps<'Tes
   const testActive = isTestActive(test);
   const statusLabel = getTestStatusLabel(test);
   const batchCards = useMemo(() => batches.slice(0, 6), [batches]);
-  const cachedExistingAttempt = results.find((entry) => entry.userId === user?.id && entry.testId === test.id);
+  const cachedExistingAttempt = results.find(
+    (entry) => (user?.id ? entry.userId === user.id : entry.userId === 'guest_user') && entry.testId === test.id
+  );
   const [existingAttempt, setExistingAttempt] = useState<TestResult | null | undefined>(cachedExistingAttempt);
+
+  useEffect(() => {
+    setExistingAttempt(cachedExistingAttempt);
+  }, [user?.id, test.id]);
 
   useEffect(() => {
     let isMounted = true;
@@ -123,15 +141,7 @@ export function TestIntroScreen({ route, navigation }: RootStackScreenProps<'Tes
       fetchExistingAttemptForTest(test.id, user?.id)
         .then((attempt) => {
           if (isMounted) {
-            setExistingAttempt(attempt);
-            if (!attempt) {
-              // If attempt was deleted in Supabase, purge from app store results
-              useAppStore.setState((prev) => ({
-                results: prev.results.filter(
-                  (r) => !(r.testId === test.id && (user?.id ? r.userId === user.id : true)),
-                ),
-              }));
-            }
+            setExistingAttempt(attempt ?? cachedExistingAttempt);
           }
         })
         .catch(() => {
@@ -317,7 +327,11 @@ export function TestIntroScreen({ route, navigation }: RootStackScreenProps<'Tes
         <Text style={styles.meta}>Duration: {formatDuration(test.durationMinutes)}</Text>
         <Text style={styles.meta}>Total Questions: {test.questionCount}</Text>
         <Text style={styles.meta}>
-          Access: {test.isOpenForAll ? 'Open for All Students' : test.allowedBatches && test.allowedBatches.length > 0 ? `Batch: ${test.allowedBatches.join(', ')}` : (test.batchId ? `Batch: ${test.batchId}` : 'Batch Restricted')}
+          Access: {test.isOpenForAll || test.accessMode === 'OPEN_FOR_ALL' || !test.batchId || test.batchId === 'ALL'
+            ? 'Open for All Students (No Batch Requirement)'
+            : test.allowedBatches && test.allowedBatches.length > 0
+            ? `Batch: ${test.allowedBatches.join(', ')}`
+            : (test.batchId ? `Batch: ${test.batchId}` : 'Open for All')}
         </Text>
         <Text style={styles.meta}>Starts: {formatDateTimeLabel(test.scheduledAt || test.startedAt || new Date().toISOString())}</Text>
         {test.endsAt ? <Text style={styles.meta}>Closing Deadline: {formatDateTimeLabel(test.endsAt)}</Text> : null}
@@ -330,7 +344,11 @@ export function TestIntroScreen({ route, navigation }: RootStackScreenProps<'Tes
         <Text style={styles.sectionTitle}>Before You Start</Text>
         <Text style={styles.instruction}>1. Questions appear one at a time for a calm, focused experience.</Text>
         <Text style={styles.instruction}>2. The timer submits the paper automatically when time runs out.</Text>
-        <Text style={styles.instruction}>3. Weekly papers are available only for the assigned batch.</Text>
+        <Text style={styles.instruction}>
+          3. {test.isOpenForAll || test.accessMode === 'OPEN_FOR_ALL' || !test.batchId || test.batchId === 'ALL'
+            ? 'This exam is open for all students across any batch or open entry.'
+            : 'Weekly papers are available for the assigned batch.'}
+        </Text>
         <Text style={styles.instruction}>4. Scholarship papers open after you submit your details.</Text>
         {questionCache[test.id] && !existingAttempt ? (
           <Text style={styles.cacheHint}>This paper is loaded and ready.</Text>

@@ -25,22 +25,20 @@ import { useAuthStore } from '../../store/authStore';
 import { getAuthenticatedAccessToken, insertRow, invokeEdgeFunction, rpc, selectRows } from '../supabase/client';
 import { mapLeaderboard, mapPdfImportQuestion, mapQuestion, mapResult, mapReviewRow, mapStudentInsights, mapSubmittedAttempt, mapTest } from '../supabase/mappers';
 import { LeaderboardRow, ResultRow, ReviewRow, StudentInsightsRpcResponse, SubmitAttemptRpcResponse, TestQuestionRow, TestRow } from '../supabase/types';
-import { fetchPdfNativeCbtQuestions, fetchReadyPdfNativeTests } from '../pdf-native/pdfNativeCbtAdapter';
-import { submitPdfNativeAttempt } from '../pdf-native/pdfNativeScoringService';
-import {
-  getLocalPdfNativeAttempt,
-  getLocalPdfNativeAttemptsForTest,
-  deleteLocalPdfNativeAttemptForTestUser,
-} from '../pdf-native/pdfNativeLocalStorage';
 import { PDFDocument } from 'pdf-lib';
 import { uploadExamAsset } from './storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
+  BOOSTER_BATCH_TEST_ID,
+  BOOSTER_BATCH_TEST_ITEM,
+  getGrandTestQuestions,
+  isBoosterBatchTest,
+  isGrandTest,
+  isNavigatorBatchTest,
   NAVIGATOR_BATCH_TEST_ID,
   NAVIGATOR_BATCH_TEST_ITEM,
-  NAVIGATOR_BATCH_QUESTIONS,
-} from './navigatorBatchTestData';
-
+} from './publishedGrandTests';
+import { invalidateAdminCache } from './admin';
 const STORAGE_KEYS_STD = {
   ATTEMPTS: '@miitjee:standard_test_attempts',
   REVIEWS: '@miitjee:standard_test_reviews',
@@ -89,9 +87,9 @@ export async function getLocalStandardAttempt(resultId: string): Promise<TestRes
 export async function getLocalStandardAttemptByTestId(testId: string, userId?: string): Promise<TestResult | null> {
   const all = await getAllLocalStandardAttempts();
   if (userId) {
-    return all.find((r) => r.testId === testId && (r.userId === userId || r.userId === 'guest_user')) || null;
+    return all.find((r) => r.testId === testId && r.userId === userId) || null;
   }
-  return all.find((r) => r.testId === testId) || null;
+  return all.find((r) => r.testId === testId && r.userId === 'guest_user') || null;
 }
 
 export async function getLocalStandardAttemptReviews(resultId: string): Promise<TestAttemptReviewItem[] | null> {
@@ -185,35 +183,23 @@ export async function fetchTests(): Promise<TestItem[]> {
 
   const filterVisibleTests = (rows: TestItem[]) =>
     rows.filter((test) => {
-      // Admin/Faculty can see all tests in management
+      // Admin/Faculty can see all tests in management (including drafts)
       if (isAdminOrFaculty) return true;
 
       // Draft or unpublished tests are NEVER visible to students
-      if (!test.isPublished) return false;
+      if (test.isPublished === false) return false;
 
-      // Miitjee student scholarship filter
+      // Miitjee student scholarship filter (outside scholarship registrations)
       if (signedInUser?.role === 'miitjee_student' && test.type === 'scholarship') return false;
 
-      // Open for All: Student sees it regardless of batch membership
-      const isOpenForAll =
-        test.isOpenForAll === true ||
-        test.accessMode === 'OPEN_FOR_ALL' ||
-        !test.batchId ||
-        test.batchId === 'ALL' ||
-        test.batchId.toLowerCase() === 'all batches';
-
-      if (isOpenForAll) {
-        return true;
+      // Batch-restricted tests are only visible to students in that batch
+      if (test.accessMode === 'RESTRICTED_BATCH' && test.allowedBatches && test.allowedBatches.length > 0) {
+        if (!signedInUser?.batchId || !test.allowedBatches.includes(signedInUser.batchId)) {
+          return false;
+        }
       }
 
-      // Batch Only: Student must belong to an allowed batch
-      const userBatchId = signedInUser?.batchId;
-      if (!userBatchId) return false;
-
-      if (test.batchId && test.batchId === userBatchId) return true;
-      if (test.allowedBatches && test.allowedBatches.includes(userBatchId)) return true;
-
-      return false;
+      return true;
     });
 
   let rpcError: unknown;
@@ -246,52 +232,24 @@ export async function fetchTests(): Promise<TestItem[]> {
     }
   }
 
-  // Filter out previous/dummy test artifacts (e.g. 11th_morning_physics)
+  // Filter out previous/dummy test artifacts and any stale/duplicate grand tests
   const isOldTest = (t: TestItem) =>
     t.id.includes('1163869') ||
     (t.title || '').toLowerCase().includes('11th_morning_physics') ||
-    (t.title || '').toLowerCase().includes('1163869');
+    (t.title || '').toLowerCase().includes('1163869') ||
+    isGrandTest(t.id, t.title);
 
   const cleanStandardTests = standardTests.filter((t) => !isOldTest(t));
-
-  // Always merge published READY/LIVE PDF-Native tests
-  const pdfNativeTests = await fetchReadyPdfNativeTests();
-  const visiblePdfNativeTests = filterVisibleTests(pdfNativeTests.filter((t) => !isOldTest(t)));
-
-  let allTests = [...cleanStandardTests, ...visiblePdfNativeTests];
-
-  // Guarantee that the Navigator Batch MIITJEE Question Paper is accessible to all students
-  const hasNavigator = allTests.some(
-    (t) => t.id === NAVIGATOR_BATCH_TEST_ID || (t.title || '').toLowerCase().includes('navigator batch')
-  );
-  if (!hasNavigator) {
-    allTests = [NAVIGATOR_BATCH_TEST_ITEM, ...allTests];
-  }
-
-  return allTests;
+  return cleanStandardTests;
 }
 
 function isUuid(id: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
 }
 
-export async function fetchQuestions(testId: string): Promise<TestQuestion[]> {
-  if (testId === NAVIGATOR_BATCH_TEST_ID || testId === 'a0000000-0000-0000-0000-000000000075') {
-    return NAVIGATOR_BATCH_QUESTIONS;
-  }
-
-  const isPdf =
-    Boolean(testId && (testId.startsWith('pdf_') || testId.startsWith('set_') || testId.includes('pdf_test_') || testId.includes('pdf_'))) ||
-    !isUuid(testId);
-
-  if (isPdf) {
-    try {
-      const pdfQs = await fetchPdfNativeCbtQuestions(testId);
-      return pdfQs;
-    } catch (err) {
-      console.warn('[fetchQuestions] PDF-Native question fetch error:', err);
-      return [];
-    }
+export async function fetchQuestions(testId: string, _testTitle?: string): Promise<TestQuestion[]> {
+  if (isGrandTest(testId, _testTitle)) {
+    return getGrandTestQuestions(testId, _testTitle);
   }
 
   try {
@@ -300,7 +258,9 @@ export async function fetchQuestions(testId: string): Promise<TestQuestion[]> {
     }, {
       retryable: true,
     });
-    return rpcRows.map(mapQuestion);
+    if (rpcRows && rpcRows.length > 0) {
+      return rpcRows.map(mapQuestion);
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message.toLowerCase() : '';
 
@@ -312,7 +272,9 @@ export async function fetchQuestions(testId: string): Promise<TestQuestion[]> {
     ) {
       throw error;
     }
+  }
 
+  try {
     const directRows = await selectRows<TestQuestionRow>(
       endpoints.tests.questions,
       'id,test_id,question_type,prompt,options,correct_answer,integer_answer,explanation,image_url,subject_label',
@@ -325,9 +287,11 @@ export async function fetchQuestions(testId: string): Promise<TestQuestion[]> {
     if (directRows && directRows.length > 0) {
       return directRows.map(mapQuestion);
     }
-
-    return [];
+  } catch {
+    // Direct query fallback
   }
+
+  return [];
 }
 
 async function submitStandardAttemptDirect(payload: SubmitAttemptPayload): Promise<SubmittedTestResponse> {
@@ -336,34 +300,61 @@ async function submitStandardAttemptDirect(payload: SubmitAttemptPayload): Promi
   const studentName = payload.studentName || currentUser?.fullName || 'Student';
 
   // 1. Fetch questions and test details
-  let questionRows: Array<{ id: string; correct_answer: string; integer_answer?: number | null; prompt?: string; options?: string[]; explanation?: string; subjectLabel?: string; imageUrl?: string | null }> = [];
+  let questionRows: Array<{
+    id: string;
+    correct_answer: string;
+    integer_answer?: number | null;
+    prompt?: string;
+    options?: string[];
+    explanation?: string;
+    subjectLabel?: string;
+    imageUrl?: string | null;
+    type?: string;
+  }> = [];
   let correctMarks = 4;
   let wrongMarks = -1;
 
-  if (payload.testId === NAVIGATOR_BATCH_TEST_ID || payload.testId === 'a0000000-0000-0000-0000-000000000075') {
-    questionRows = NAVIGATOR_BATCH_QUESTIONS.map((q) => ({
-      id: q.id,
-      correct_answer: q.correctAnswer,
-      integer_answer: q.integerAnswer,
-      prompt: q.prompt,
-      options: q.options,
-      explanation: q.explanation,
-      subjectLabel: q.subjectLabel,
-      imageUrl: q.imageUrl,
+  if (isGrandTest(payload.testId)) {
+    const grandQs = getGrandTestQuestions(payload.testId);
+    questionRows = grandQs.map((gq) => ({
+      id: gq.id,
+      correct_answer: gq.correctAnswer || (gq.integerAnswer !== null && gq.integerAnswer !== undefined ? String(gq.integerAnswer) : ''),
+      integer_answer: gq.integerAnswer,
+      prompt: gq.prompt,
+      options: gq.options,
+      explanation: gq.explanation,
+      subjectLabel: gq.subjectLabel,
+      imageUrl: gq.imageUrl,
+      type: gq.type,
     }));
+    correctMarks = 4;
+    wrongMarks = -1;
   } else {
     try {
-      const [qRows, testRows] = await Promise.all([
-        selectRows<TestQuestionRow>('test_questions', '*', { test_id: `eq.${payload.testId}`, order: 'position.asc' }),
-        selectRows<TestRow>('tests', '*', { id: `eq.${payload.testId}` }),
+      const [fetchedQs, testRows] = await Promise.all([
+        fetchQuestions(payload.testId).catch(() => []),
+        selectRows<TestRow>('tests', '*', { id: `eq.${payload.testId}` }).catch(() => []),
       ]);
-      questionRows = qRows;
       const testRow = testRows[0];
       correctMarks = Number(testRow?.correct_marks) || 4;
       wrongMarks =
         testRow?.wrong_marks !== undefined && testRow?.wrong_marks !== null
           ? -Math.abs(Number(testRow.wrong_marks))
           : -1;
+
+      if (fetchedQs && fetchedQs.length > 0) {
+        questionRows = fetchedQs.map((q) => ({
+          id: q.id,
+          correct_answer: q.correctAnswer || (q.integerAnswer !== null && q.integerAnswer !== undefined ? String(q.integerAnswer) : ''),
+          integer_answer: q.integerAnswer,
+          prompt: q.prompt,
+          options: q.options,
+          explanation: q.explanation,
+          subjectLabel: q.subjectLabel,
+          imageUrl: q.imageUrl,
+          type: q.type,
+        }));
+      }
     } catch {
       questionRows = [];
     }
@@ -384,7 +375,11 @@ async function submitStandardAttemptDirect(payload: SubmitAttemptPayload): Promi
   const reviewItems: TestAttemptReviewItem[] = [];
 
   questionRows.forEach((q, idx) => {
-    const rawSelected = payload.answers[q.id];
+    const rawSelected =
+      payload.answers[q.id] ??
+      payload.answers[`${payload.testId}_draft_${idx + 1}`] ??
+      payload.answers[`draft_${idx + 1}`];
+
     const isAttempted =
       rawSelected !== null &&
       rawSelected !== undefined &&
@@ -405,7 +400,7 @@ async function submitStandardAttemptDirect(payload: SubmitAttemptPayload): Promi
       reviewItems.push({
         questionId: q.id,
         testId: payload.testId,
-        questionType: 'mcq',
+        questionType: (q.type as any) || 'mcq',
         prompt: q.prompt || `Question ${idx + 1}`,
         options: q.options || ['A', 'B', 'C', 'D'],
         userAnswer: '',
@@ -418,7 +413,16 @@ async function submitStandardAttemptDirect(payload: SubmitAttemptPayload): Promi
     } else {
       const selected = rawSelected.trim();
       const normSelected = selected.replace(/^Option\s+/i, '').trim().toLowerCase();
-      const normCorrect = cleanCorrect.replace(/^Option\s+/i, '').trim().toLowerCase();
+      let normCorrect = cleanCorrect.replace(/^Option\s+/i, '').trim().toLowerCase();
+
+      // Check option letter vs text matching (e.g., student selected 'A' and option text in DB is matched)
+      if (q.options && Array.isArray(q.options) && /^[a-d]$/i.test(normSelected)) {
+        const optIdx = normSelected.toUpperCase().charCodeAt(0) - 65;
+        const optText = (q.options[optIdx] || '').trim().toLowerCase();
+        if (optText === normCorrect || normSelected === normCorrect) {
+          normCorrect = normSelected;
+        }
+      }
 
       const isNumSelected = !isNaN(Number(normSelected)) && normSelected.length > 0;
       const isNumCorrect = !isNaN(Number(normCorrect)) && normCorrect.length > 0;
@@ -439,7 +443,7 @@ async function submitStandardAttemptDirect(payload: SubmitAttemptPayload): Promi
         reviewItems.push({
           questionId: q.id,
           testId: payload.testId,
-          questionType: 'mcq',
+          questionType: (q.type as any) || 'mcq',
           prompt: q.prompt || `Question ${idx + 1}`,
           options: q.options || ['A', 'B', 'C', 'D'],
           userAnswer: selected,
@@ -462,7 +466,7 @@ async function submitStandardAttemptDirect(payload: SubmitAttemptPayload): Promi
         reviewItems.push({
           questionId: q.id,
           testId: payload.testId,
-          questionType: 'mcq',
+          questionType: (q.type as any) || 'mcq',
           prompt: q.prompt || `Question ${idx + 1}`,
           options: q.options || ['A', 'B', 'C', 'D'],
           userAnswer: selected,
@@ -547,6 +551,7 @@ async function submitStandardAttemptDirect(payload: SubmitAttemptPayload): Promi
 
   // Persist locally for instant loading and offline resiliency
   await saveLocalStandardAttempt(result, reviewItems);
+  invalidateAdminCache();
 
   return {
     result,
@@ -566,31 +571,90 @@ async function submitStandardAttemptDirect(payload: SubmitAttemptPayload): Promi
   };
 }
 
+function normalizeUserAnswerForQuestion(val: string | undefined | null, question: TestQuestion): string {
+  if (val === undefined || val === null || String(val).trim() === '') {
+    return '';
+  }
+
+  const raw = String(val).trim();
+  const normRaw = raw.replace(/^Option\s+/i, '').trim();
+  const cleanCorrect = (question.correctAnswer || (question.integerAnswer !== undefined && question.integerAnswer !== null ? String(question.integerAnswer) : '') || '').trim();
+  const normCorrect = cleanCorrect.replace(/^Option\s+/i, '').trim();
+
+  if (question.options && Array.isArray(question.options) && question.options.length > 0) {
+    const isSingleLetterUser = /^[A-D]$/i.test(normRaw);
+    const isSingleLetterCorrect = /^[A-D]$/i.test(normCorrect);
+
+    if (isSingleLetterUser) {
+      const optIdx = normRaw.toUpperCase().charCodeAt(0) - 65;
+      const optText = (question.options[optIdx] || '').trim();
+
+      if (!isSingleLetterCorrect && optText) {
+        return optText;
+      }
+      return normRaw.toUpperCase();
+    } else {
+      if (isSingleLetterCorrect) {
+        const foundIdx = question.options.findIndex(
+          (opt) => (opt || '').trim().toLowerCase() === normRaw.toLowerCase()
+        );
+        if (foundIdx !== -1) {
+          return String.fromCharCode(65 + foundIdx);
+        }
+      }
+      return raw;
+    }
+  }
+
+  return raw;
+}
+
 export async function submitAttempt(payload: SubmitAttemptPayload): Promise<SubmittedTestResponse> {
-  if (
-    payload.testId === NAVIGATOR_BATCH_TEST_ID ||
-    payload.testId === 'a0000000-0000-0000-0000-000000000075' ||
-    payload.testId.includes('navigator')
-  ) {
+  if (isGrandTest(payload.testId)) {
     return submitStandardAttemptDirect(payload);
   }
 
-  const isPdf = payload.testId && (payload.testId.startsWith('pdf_') || payload.testId.startsWith('set_') || payload.testId.includes('pdf_test_') || payload.testId.includes('pdf_'));
-
-  if (isPdf || !isUuid(payload.testId)) {
-    return submitPdfNativeAttempt(payload);
+  // Pre-normalize answers to ensure every question's UUID is populated and option letters match canonical answer format
+  let normalizedAnswers: Record<string, string> = {};
+  try {
+    const qList = await fetchQuestions(payload.testId);
+    if (qList && qList.length > 0) {
+      qList.forEach((q, idx) => {
+        const rawVal =
+          payload.answers[q.id] ??
+          payload.answers[`${payload.testId}_draft_${idx + 1}`] ??
+          payload.answers[`draft_${idx + 1}`];
+        if (rawVal !== undefined && rawVal !== null && typeof rawVal === 'string' && rawVal.trim().length > 0) {
+          const canonicalVal = normalizeUserAnswerForQuestion(rawVal, q);
+          if (canonicalVal && canonicalVal.trim().length > 0) {
+            normalizedAnswers[q.id] = canonicalVal;
+          }
+        }
+      });
+    } else {
+      normalizedAnswers = { ...payload.answers };
+    }
+  } catch {
+    normalizedAnswers = { ...payload.answers };
   }
+
+  const effectivePayload: SubmitAttemptPayload = {
+    ...payload,
+    answers: normalizedAnswers,
+  };
 
   try {
     const response = await rpc<SubmitAttemptRpcResponse>(endpoints.tests.submit, {
-      p_test_id: payload.testId,
-      p_answers: payload.answers,
-      p_student_name: payload.studentName ?? null,
+      p_test_id: effectivePayload.testId,
+      p_answers: effectivePayload.answers,
+      p_student_name: effectivePayload.studentName ?? null,
     });
     const mapped = mapSubmittedAttempt(response);
+    await saveLocalStandardAttempt(mapped.result, []).catch(() => undefined);
+    invalidateAdminCache();
     logInfo('Test submission succeeded.', {
-      testId: payload.testId,
-      userId: payload.userId,
+      testId: effectivePayload.testId,
+      userId: effectivePayload.userId,
       resultId: mapped.result.id,
       score: mapped.result.score,
     });
@@ -600,20 +664,24 @@ export async function submitAttempt(payload: SubmitAttemptPayload): Promise<Subm
     if (errorMsg.includes('candidate function') || errorMsg.includes('parameter') || errorMsg.includes('overload')) {
       try {
         const legacyResponse = await rpc<SubmitAttemptRpcResponse>(endpoints.tests.submit, {
-          p_test_id: payload.testId,
-          p_answers: payload.answers,
+          p_test_id: effectivePayload.testId,
+          p_answers: effectivePayload.answers,
         });
-        return mapSubmittedAttempt(legacyResponse);
+        const legacyMapped = mapSubmittedAttempt(legacyResponse);
+        await saveLocalStandardAttempt(legacyMapped.result, []).catch(() => undefined);
+        invalidateAdminCache();
+        return legacyMapped;
       } catch {
         // Fall through to fallback
       }
     }
 
     logWarn('Submitting attempt via evaluated fallback:', { error: errorMsg });
-    const fallbackResult = await submitStandardAttemptDirect(payload);
+    const fallbackResult = await submitStandardAttemptDirect(effectivePayload);
+    invalidateAdminCache();
     logInfo('Fallback test submission succeeded.', {
-      testId: payload.testId,
-      userId: payload.userId,
+      testId: effectivePayload.testId,
+      userId: effectivePayload.userId,
       resultId: fallbackResult.result.id,
       score: fallbackResult.result.score,
     });
@@ -629,13 +697,10 @@ export async function fetchLeaderboard(
   },
   currentUserId?: string,
 ): Promise<LeaderboardEntry[]> {
-  const isPdfTest = params?.testId && params.testId.startsWith('pdf_test_');
-  const rpcTestId = isPdfTest ? null : (params?.testId ?? null);
-
   const rows = await rpc<LeaderboardRow[]>(endpoints.tests.leaderboard, {
     p_scope: params?.scope ?? 'overall_history',
     p_batch_id: params?.batchId ?? null,
-    p_test_id: rpcTestId,
+    p_test_id: params?.testId ?? null,
   }, {
     retryable: true,
   });
@@ -760,42 +825,92 @@ export async function fetchAttemptReview(resultId: string): Promise<TestAttemptR
     return localReviews;
   }
 
-  const isPdf = resultId && (resultId.startsWith('attempt_') || resultId.startsWith('pdf_') || !isUuid(resultId));
-  if (isPdf) {
-    const attempt = await getLocalPdfNativeAttempt(resultId);
-    if (attempt && Array.isArray(attempt.answers)) {
-      return attempt.answers.map((ans, idx) => ({
-        questionId: ans.question_id,
-        testId: attempt.test_id,
-        questionType: 'mcq' as const,
-        prompt: `Question ${ans.question_number || idx + 1}`,
-        options: ['A', 'B', 'C', 'D'],
-        userAnswer: ans.selected_answer || '',
-        correctAnswer: ans.correct_answer,
-        isCorrect: ans.status === 'CORRECT',
-        isUnattempted: ans.status === 'UNATTEMPTED',
-        marksAwarded: ans.awarded_marks,
-        negativeMarks: ans.awarded_marks < 0 ? Math.abs(ans.awarded_marks) : 0,
-        unattemptedMarks: 0,
-        explanation: 'Original PDF question region.',
-      }));
+  let rpcReviewItems: TestAttemptReviewItem[] = [];
+  if (isUuid(resultId)) {
+    try {
+      const rows = await rpc<ReviewRow[]>(endpoints.tests.review, {
+        p_attempt_id: resultId,
+      }, {
+        retryable: true,
+      });
+      if (rows && rows.length > 0) {
+        rpcReviewItems = rows.map(mapReviewRow);
+      }
+    } catch {
+      // Fall through to reconstruction
     }
   }
 
-  if (!isUuid(resultId)) {
-    return [];
+  if (rpcReviewItems.length > 0) {
+    return rpcReviewItems;
   }
 
+  // Fallback: Reconstruct review items from attempt record answers and test questions
   try {
-    const rows = await rpc<ReviewRow[]>(endpoints.tests.review, {
-      p_attempt_id: resultId,
-    }, {
-      retryable: true,
-    });
-    return rows.map(mapReviewRow);
+    const attempt = await fetchResultById(resultId);
+    if (attempt?.testId) {
+      let answersMap: Record<string, string> = {};
+      try {
+        const attemptRows = await selectRows<{ answers?: Record<string, string> }>('test_attempts', 'answers', { id: `eq.${resultId}` });
+        if (attemptRows && attemptRows[0]?.answers) {
+          answersMap = attemptRows[0].answers;
+        }
+      } catch {
+        // Ignore
+      }
+
+      const questions = await fetchQuestions(attempt.testId);
+      if (questions && questions.length > 0) {
+        const reconstructed: TestAttemptReviewItem[] = questions.map((q, idx) => {
+          const rawAnswer =
+            answersMap[q.id] ??
+            answersMap[`${attempt.testId}_draft_${idx + 1}`] ??
+            answersMap[`draft_${idx + 1}`] ??
+            '';
+          const userAns = typeof rawAnswer === 'string' ? rawAnswer.trim() : '';
+          const isUnatt = userAns === '';
+          const cleanCorrect = (q.correctAnswer || (q.integerAnswer !== undefined && q.integerAnswer !== null ? String(q.integerAnswer) : '')).trim();
+
+          const normUser = userAns.replace(/^Option\s+/i, '').trim().toLowerCase();
+          let normCorrect = cleanCorrect.replace(/^Option\s+/i, '').trim().toLowerCase();
+
+          if (q.options && Array.isArray(q.options) && /^[a-d]$/i.test(normUser)) {
+            const optIdx = normUser.toUpperCase().charCodeAt(0) - 65;
+            const optText = (q.options[optIdx] || '').trim().toLowerCase();
+            if (optText === normCorrect || normUser === normCorrect) {
+              normCorrect = normUser;
+            }
+          }
+
+          const isNumUser = !isNaN(Number(normUser)) && normUser.length > 0;
+          const isNumCorrect = !isNaN(Number(normCorrect)) && normCorrect.length > 0;
+          const isNumericMatch = isNumUser && isNumCorrect && Number(normUser) === Number(normCorrect);
+
+          const isCorrect = !isUnatt && (normUser === normCorrect || isNumericMatch);
+
+          return {
+            questionId: q.id,
+            testId: attempt.testId,
+            questionType: (q.type as any) || 'mcq',
+            prompt: q.prompt || `Question ${idx + 1}`,
+            options: q.options || ['A', 'B', 'C', 'D'],
+            userAnswer: userAns,
+            correctAnswer: cleanCorrect,
+            isCorrect,
+            isUnattempted: isUnatt,
+            explanation: q.explanation || `Correct Answer: ${cleanCorrect}`,
+            imageUrl: q.imageUrl,
+          };
+        });
+
+        return reconstructed;
+      }
+    }
   } catch {
-    return [];
+    // Return empty
   }
+
+  return [];
 }
 
 export async function fetchResultById(resultId: string): Promise<TestResult | null> {
@@ -808,32 +923,6 @@ export async function fetchResultById(resultId: string): Promise<TestResult | nu
     return localStd;
   }
 
-  const isPdf = resultId.startsWith('attempt_') || resultId.startsWith('pdf_') || !isUuid(resultId);
-  if (isPdf) {
-    const attempt = await getLocalPdfNativeAttempt(resultId);
-    if (attempt) {
-      return {
-        id: attempt.id,
-        testId: attempt.test_id,
-        userId: attempt.user_id || 'guest',
-        studentName: attempt.student_name || 'Student',
-        score: attempt.total_score,
-        correctAnswers: attempt.correct_count,
-        wrongAnswers: attempt.wrong_count,
-        unattempted: attempt.unattempted_count,
-        totalQuestions: attempt.total_questions,
-        rank: 1,
-        percentile: 100,
-        submittedAt: attempt.created_at || new Date().toISOString(),
-        isPdfNative: true,
-      };
-    }
-  }
-
-  if (!isUuid(resultId)) {
-    return null;
-  }
-
   try {
     const rows = await selectRows<ResultRow>(
       'test_attempt_summaries',
@@ -843,10 +932,30 @@ export async function fetchResultById(resultId: string): Promise<TestResult | nu
         limit: 1,
       },
     );
-    return rows[0] ? mapResult(rows[0]) : null;
+    if (rows && rows[0]) {
+      return mapResult(rows[0]);
+    }
   } catch {
-    return null;
+    // Fall through to test_attempts table
   }
+
+  try {
+    const attemptRows = await selectRows<ResultRow>(
+      'test_attempts',
+      'id,test_id,user_id,student_name,score,correct_answers,wrong_answers,unattempted,total_questions,percentile,submitted_at',
+      {
+        id: `eq.${resultId}`,
+        limit: 1,
+      },
+    );
+    if (attemptRows && attemptRows[0]) {
+      return mapResult(attemptRows[0]);
+    }
+  } catch {
+    // Return null
+  }
+
+  return null;
 }
 
 export async function fetchExistingAttemptForTest(testId: string, userId?: string): Promise<TestResult | null> {
@@ -855,138 +964,56 @@ export async function fetchExistingAttemptForTest(testId: string, userId?: strin
     return localStd;
   }
 
-  const isPdf = testId && (testId.startsWith('pdf_') || testId.startsWith('set_') || testId.includes('pdf_test_') || testId.includes('pdf_'));
-
-  if (isPdf || !isUuid(testId)) {
-    // 1. Check Supabase pdf_native_attempts if userId is available
-    if (userId) {
-      try {
-        const rows = await selectRows<{
-          id: string;
-          test_id: string;
-          user_id: string | null;
-          student_name: string | null;
-          total_questions: number;
-          correct_count: number;
-          wrong_count: number;
-          unattempted_count: number;
-          total_score: number;
-          created_at: string;
-        }>('pdf_native_attempts', '*', {
-          test_id: `eq.${testId}`,
-          user_id: `eq.${userId}`,
-          order: 'created_at.desc',
-          limit: 1,
-        });
-
-        if (rows && rows.length > 0) {
-          const r = rows[0];
-          if (r) {
-            return {
-              id: r.id,
-              testId: r.test_id,
-              userId: r.user_id || userId,
-              studentName: r.student_name || 'Student',
-              score: r.total_score,
-              correctAnswers: r.correct_count,
-              wrongAnswers: r.wrong_count,
-              unattempted: r.unattempted_count,
-              totalQuestions: r.total_questions,
-              rank: 1,
-              percentile: 100,
-              submittedAt: r.created_at || new Date().toISOString(),
-              isPdfNative: true,
-            };
-          }
-        } else {
-          // Supabase explicitly has 0 records (e.g., admin deleted the attempt in Supabase to allow re-test)
-          // Clean up any stale local attempt so local cache does not block re-attempt
-          void deleteLocalPdfNativeAttemptForTestUser(testId, userId);
-          return null;
-        }
-      } catch {
-        // Fallback to local store only on network failure
-        const attempts = await getLocalPdfNativeAttemptsForTest(testId);
-        const userAttempt = attempts.find((a) => a.user_id === userId);
-        if (userAttempt) {
-          return {
-            id: userAttempt.id,
-            testId: userAttempt.test_id,
-            userId: userAttempt.user_id || userId,
-            studentName: userAttempt.student_name || 'Student',
-            score: userAttempt.total_score,
-            correctAnswers: userAttempt.correct_count,
-            wrongAnswers: userAttempt.wrong_count,
-            unattempted: userAttempt.unattempted_count,
-            totalQuestions: userAttempt.total_questions,
-            rank: 1,
-            percentile: 100,
-            submittedAt: userAttempt.created_at || new Date().toISOString(),
-            isPdfNative: true,
-          };
-        }
+  if (userId) {
+    try {
+      const rows = await rpc<ResultRow[]>(endpoints.tests.existingAttempt, {
+        p_test_id: testId,
+      }, {
+        retryable: true,
+      });
+      if (rows && rows[0]) {
+        return mapResult(rows[0]);
       }
-    }
-
-    // 2. Check local store only for guest user
-    if (!userId) {
-      const attempts = await getLocalPdfNativeAttemptsForTest(testId);
-      const userAttempt = attempts.find((a) => a.user_id === 'guest_user');
-      if (userAttempt) {
-        return {
-          id: userAttempt.id,
-          testId: userAttempt.test_id,
-          userId: 'guest_user',
-          studentName: userAttempt.student_name || 'Student',
-          score: userAttempt.total_score,
-          correctAnswers: userAttempt.correct_count,
-          wrongAnswers: userAttempt.wrong_count,
-          unattempted: userAttempt.unattempted_count,
-          totalQuestions: userAttempt.total_questions,
-          rank: 1,
-          percentile: 100,
-          submittedAt: userAttempt.created_at || new Date().toISOString(),
-          isPdfNative: true,
-        };
-      }
-    }
-    return null;
-  }
-
-  if (!userId) {
-    return null;
-  }
-
-  try {
-    const rows = await rpc<ResultRow[]>(endpoints.tests.existingAttempt, {
-      p_test_id: testId,
-    }, {
-      retryable: true,
-    });
-    return rows[0] ? mapResult(rows[0]) : null;
-  } catch (error) {
-    const message = error instanceof Error ? error.message.toLowerCase() : '';
-
-    if (message.includes('stack depth')) {
-      throw error;
+    } catch {
+      // Fall through to direct query
     }
 
     try {
-      const rows = await selectRows<ResultRow>(
+      const summaryRows = await selectRows<ResultRow>(
         'test_attempt_summaries',
-        'id,test_id,user_id,score,correct_answers,total_questions,rank,percentile,submitted_at',
+        'id,test_id,user_id,student_name,score,correct_answers,wrong_answers,unattempted,total_questions,rank,percentile,submitted_at',
         {
           test_id: `eq.${testId}`,
           user_id: `eq.${userId}`,
-          order: 'submitted_at.desc',
           limit: 1,
         },
       );
-      return rows[0] ? mapResult(rows[0]) : null;
+      if (summaryRows && summaryRows[0]) {
+        return mapResult(summaryRows[0]);
+      }
     } catch {
-      return null;
+      // Fall through to test_attempts table
+    }
+
+    try {
+      const attemptRows = await selectRows<ResultRow>(
+        'test_attempts',
+        'id,test_id,user_id,student_name,score,correct_answers,wrong_answers,unattempted,total_questions,percentile,submitted_at',
+        {
+          test_id: `eq.${testId}`,
+          user_id: `eq.${userId}`,
+          limit: 1,
+        },
+      );
+      if (attemptRows && attemptRows[0]) {
+        return mapResult(attemptRows[0]);
+      }
+    } catch {
+      // Return null
     }
   }
+
+  return null;
 }
 
 async function splitPdfUrlInto3PageChunkUrls(pdfUrl: string): Promise<string[]> {
@@ -1069,6 +1096,21 @@ export async function importQuestionsFromPdf(payload: PdfImportPayload & { provi
 
 export async function resolveExamLink(shareCode: string, userId?: string): Promise<ExamLinkResolution> {
   const cleanCode = shareCode.trim().toUpperCase();
+
+  if (cleanCode === 'NAVIGTR1' || cleanCode === 'NAVIGATOR' || cleanCode.startsWith('A0000000')) {
+    return {
+      status: 'VALID',
+      message: 'Exam link resolved successfully.',
+      test: NAVIGATOR_BATCH_TEST_ITEM,
+    };
+  }
+  if (cleanCode === 'BOOSTER1' || cleanCode === 'BOOSTER' || cleanCode.startsWith('B0000000')) {
+    return {
+      status: 'VALID',
+      message: 'Exam link resolved successfully.',
+      test: BOOSTER_BATCH_TEST_ITEM,
+    };
+  }
 
   try {
     const rpcResult = await rpc<{

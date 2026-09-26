@@ -1,3 +1,47 @@
 {
-    "git.ignoreLimitWarning": true
+  "git.ignoreLimitWarning": true,
+  "files.exclude": {
+    "**/node_modules": true,
+    ".android-codex": true,
+    ".gradle": true,
+    ".gradle-codex": true,
+    ".metro-cache": true,
+    "android": true,
+    "desktop": true,
+    "dist": true,
+    "dist-electron": true,
+    "scratch": true,
+    "question paper/extracted": true,
+    "question paper/extracted_booster": true,
+    "question paper/extracted_navigator": true,
+    "toolchains": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    ".android-codex": true,
+    ".gradle": true,
+    ".gradle-codex": true,
+    ".metro-cache": true,
+    "android": true,
+    "desktop": true,
+    "dist": true,
+    "dist-electron": true,
+    "scratch": true,
+    "question paper/extracted": true,
+    "question paper/extracted_booster": true,
+    "question paper/extracted_navigator": true,
+    "toolchains": true
+  },
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    ".android-codex/**": true,
+    ".gradle/**": true,
+    ".gradle-codex/**": true,
+    ".metro-cache/**": true,
+    "android/**": true,
+    "desktop/**": true,
+    "dist/**": true,
+    "dist-electron/**": true,
+    "toolchains/**": true
+  }
 }

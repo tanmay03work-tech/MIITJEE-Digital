@@ -22,22 +22,12 @@ import {
 } from '../../types';
 import { appEnv, assertWorkerConfig } from '../../config/env';
 import { endpoints } from './config';
-import { deleteRows, getAuthenticatedAccessToken, rpc, selectRows } from '../supabase/client';
+import { deleteRows, getAuthenticatedAccessToken, insertRow, insertRows, rpc, selectRows, updateRows } from '../supabase/client';
+import { useAuthStore } from '../../store/authStore';
 import { mapActivityLog, mapAnalytics, mapAutoSubmitEvent, mapBatch, mapEnquiry, mapEnrollmentQuery, mapProfile, mapQuestionAnalytics, mapResult, mapScholarshipRegistration, mapStudentAnalytics, mapTest, mapTestAnalytics, mapViolationSummary, normalizeAssetUrl } from '../supabase/mappers';
 import { ActivityLogRow, AnalyticsRow, AutoSubmitEventRow, BatchRow, EnquiryRow, EnrollmentQueryRow, ProfileRow, QuestionAnalyticsRow, ResultRow, ScholarshipRegistrationRow, StudentAnalyticsRow, TestAnalyticsRow, TestRow, ViolationSummaryRow } from '../supabase/types';
 import { coerceDurationMinutes } from '../../utils/formatters';
-import {
-  deletePdfNativeTest,
-  getPdfNativeTestById,
-  listPdfNativeTests,
-  publishPdfNativeTest,
-  updatePdfNativeTest,
-} from '../pdf-native/pdfNativeTestService';
-import { mapPdfNativeTestToCbtTestItem } from '../pdf-native/pdfNativeCbtAdapter';
-import {
-  getLocalPdfNativeAttempts,
-  getLocalPdfNativeTestQuestions,
-} from '../pdf-native/pdfNativeLocalStorage';
+import { logWarn } from '../../utils/logger';
 import { getAllLocalStandardAttempts } from './tests';
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -69,7 +59,7 @@ function setCachedRows<T>(key: string, rows: T[]) {
   pageCache.set(key, { timestamp: Date.now(), rows });
 }
 
-function invalidateAdminCache() {
+export function invalidateAdminCache() {
   pageCache.clear();
 }
 
@@ -227,15 +217,6 @@ export async function fetchAdminTestsPage(options?: PageOptions): Promise<TestIt
     console.warn('[fetchAdminTestsPage] Standard tests query fallback:', err);
   }
 
-  // Include PDF-Native tests in admin tests list
-  try {
-    const pdfNativeRaw = await listPdfNativeTests();
-    const pdfNativeItems = pdfNativeRaw.map(mapPdfNativeTestToCbtTestItem);
-    mappedRows = [...mappedRows, ...pdfNativeItems];
-  } catch (err) {
-    console.warn('[fetchAdminTestsPage] Error loading PDF-Native tests:', err);
-  }
-
   if (options?.search) {
     const q = options.search.toLowerCase();
     mappedRows = mappedRows.filter(
@@ -289,77 +270,6 @@ export async function fetchResultsPage(userId?: string, options?: PageOptions): 
     }
   }
 
-  // Merge Supabase PDF-Native test attempts
-  try {
-    const pdfRows = await selectRows<{
-      id: string;
-      test_id: string;
-      user_id: string | null;
-      student_name: string | null;
-      total_score: number | null;
-      score: number | null;
-      correct_count: number;
-      wrong_count: number;
-      unattempted_count: number;
-      total_questions: number;
-      created_at: string;
-    }>('pdf_native_attempts', '*', {
-      ...(userId ? { user_id: `eq.${userId}` } : {}),
-      order: 'created_at.desc',
-      ...pageQuery,
-    });
-
-    for (const a of pdfRows) {
-      if (!mappedRows.some((r) => r.id === a.id)) {
-        mappedRows.push({
-          id: a.id,
-          testId: a.test_id,
-          userId: a.user_id || userId || 'guest_user',
-          studentName: a.student_name || 'Student',
-          score: a.total_score ?? a.score ?? 0,
-          correctAnswers: a.correct_count,
-          wrongAnswers: a.wrong_count,
-          unattempted: a.unattempted_count,
-          totalQuestions: a.total_questions,
-          rank: 1,
-          percentile: 100,
-          submittedAt: a.created_at || new Date().toISOString(),
-          isPdfNative: true,
-        });
-      }
-    }
-  } catch (err) {
-    // Only on network error, merge local guest attempts
-    try {
-      const localPdfAttempts = await getLocalPdfNativeAttempts();
-      const filteredPdfAttempts = userId
-        ? localPdfAttempts.filter((a) => a.user_id === userId)
-        : localPdfAttempts;
-
-      for (const a of filteredPdfAttempts) {
-        if (!mappedRows.some((r) => r.id === a.id)) {
-          mappedRows.push({
-            id: a.id,
-            testId: a.test_id,
-            userId: a.user_id || userId || 'guest_user',
-            studentName: a.student_name || 'Student',
-            score: a.total_score,
-            correctAnswers: a.correct_count,
-            wrongAnswers: a.wrong_count,
-            unattempted: a.unattempted_count,
-            totalQuestions: a.total_questions,
-            rank: 1,
-            percentile: 100,
-            submittedAt: a.created_at || new Date().toISOString(),
-            isPdfNative: true,
-          });
-        }
-      }
-    } catch {
-      // Ignore
-    }
-  }
-
   // Merge local standard attempts (Navigator batch test etc.)
   try {
     const stdAttempts = await getAllLocalStandardAttempts();
@@ -386,121 +296,89 @@ export async function fetchResults(userId?: string, options?: PageOptions): Prom
 
 export async function createTest(payload: CreateTestPayload): Promise<TestItem> {
   const safeDurationMinutes = coerceDurationMinutes(payload.durationMinutes);
+  const rawBatchId = payload.batchId?.trim();
+  const isOpenForAll = Boolean(payload.isOpenForAll) || !rawBatchId || rawBatchId === 'ALL' || rawBatchId.toLowerCase() === 'all batches';
+  // Use a known existing batch (e.g. ELEVATOR or specified batch) for the initial create RPC, then decouple batch via update_test_details if Open for All
+  const initialBatchId = (!isOpenForAll && rawBatchId && rawBatchId !== 'ALL') ? rawBatchId : 'ELEVATOR';
 
-  try {
-    const row = await rpc<TestRow>(endpoints.admin.createTest, {
-      p_title: payload.title,
-      p_description: payload.description,
-      p_duration_minutes: safeDurationMinutes,
-      p_batch_id: payload.batchId ?? null,
-      p_type: payload.type,
-      p_subject: payload.subject,
-      p_scholarship_admission_class: payload.scholarshipAdmissionClass ?? null,
-      p_scholarship_target_exam: payload.scholarshipTargetExam ?? null,
-      p_questions: payload.questions,
-      p_scheduled_at: payload.scheduledAt,
-      p_is_open_for_all: payload.isOpenForAll ?? false,
-    });
-    invalidateAdminCache();
-    return mapTest(row);
-  } catch (error) {
-    const message = error instanceof Error ? error.message.toLowerCase() : '';
-    if (message.includes('parameter') || message.includes('function') || message.includes('schema cache')) {
-      const row = await rpc<TestRow>(endpoints.admin.createTest, {
+  // 1. Invoke create_test_with_questions (SECURITY DEFINER) with 10-parameter signature
+  const row = await rpc<TestRow>(endpoints.admin.createTest, {
+    p_title: payload.title,
+    p_description: payload.description,
+    p_duration_minutes: safeDurationMinutes,
+    p_batch_id: initialBatchId,
+    p_type: payload.type,
+    p_subject: payload.subject,
+    p_scholarship_admission_class: payload.scholarshipAdmissionClass ?? null,
+    p_scholarship_target_exam: payload.scholarshipTargetExam ?? null,
+    p_questions: payload.questions,
+    p_scheduled_at: payload.scheduledAt,
+  });
+
+  // 2. If Open for All, update the test details to clear batch_id and set is_open_for_all: true
+  if (isOpenForAll && row?.id) {
+    try {
+      await rpc<TestRow>(endpoints.admin.updateTest, {
+        p_test_id: row.id,
         p_title: payload.title,
         p_description: payload.description,
         p_duration_minutes: safeDurationMinutes,
-        p_batch_id: payload.batchId ?? null,
+        p_batch_id: null,
         p_type: payload.type,
         p_subject: payload.subject,
+        p_scheduled_at: payload.scheduledAt,
         p_scholarship_admission_class: payload.scholarshipAdmissionClass ?? null,
         p_scholarship_target_exam: payload.scholarshipTargetExam ?? null,
-        p_questions: payload.questions,
-        p_scheduled_at: payload.scheduledAt,
+        p_is_open_for_all: true,
       });
-      invalidateAdminCache();
-      return mapTest(row);
+    } catch {
+      // Best-effort update
     }
-    throw error;
   }
+
+  invalidateAdminCache();
+  const mapped = mapTest(row);
+  if (isOpenForAll) {
+    mapped.isOpenForAll = true;
+    mapped.batchId = undefined;
+    mapped.accessMode = 'OPEN_FOR_ALL';
+  }
+  return mapped;
 }
 
 export async function updateTest(payload: UpdateTestPayload): Promise<TestItem> {
   const safeDurationMinutes = coerceDurationMinutes(payload.durationMinutes);
+  const rawBatchId = payload.batchId?.trim();
+  const isOpenForAll = Boolean(payload.isOpenForAll) || !rawBatchId || rawBatchId === 'ALL' || rawBatchId.toLowerCase() === 'all batches';
+  const resolvedBatchId = isOpenForAll
+    ? null
+    : (rawBatchId && rawBatchId !== 'ALL' && rawBatchId.toLowerCase() !== 'all batches' ? rawBatchId : null);
 
-  if (payload.testId.startsWith('pdf_test_')) {
-    const existing = await getPdfNativeTestById(payload.testId);
-    if (existing) {
-      const qRelations = await getLocalPdfNativeTestQuestions(payload.testId);
-      const qIds = qRelations.map((tq) => tq.question_id);
-      await updatePdfNativeTest({
-        id: payload.testId,
-        title: payload.title,
-        description: payload.description,
-        duration_minutes: safeDurationMinutes,
-        subject: (payload.subject as any) || existing.subject,
-        status: existing.status,
-        question_ids: qIds,
-        sections: existing.sections,
-      });
-      const updated = await getPdfNativeTestById(payload.testId);
-      invalidateAdminCache();
-      if (updated) {
-        return mapPdfNativeTestToCbtTestItem(updated);
-      }
-    }
+  const row = await rpc<TestRow>(endpoints.admin.updateTest, {
+    p_test_id: payload.testId,
+    p_title: payload.title,
+    p_description: payload.description,
+    p_duration_minutes: safeDurationMinutes,
+    p_batch_id: resolvedBatchId,
+    p_type: payload.type,
+    p_subject: payload.subject,
+    p_scheduled_at: payload.scheduledAt,
+    p_scholarship_admission_class: payload.scholarshipAdmissionClass ?? null,
+    p_scholarship_target_exam: payload.scholarshipTargetExam ?? null,
+    p_is_open_for_all: isOpenForAll,
+  });
+
+  invalidateAdminCache();
+  const mapped = mapTest(row);
+  if (isOpenForAll) {
+    mapped.isOpenForAll = true;
+    mapped.batchId = undefined;
+    mapped.accessMode = 'OPEN_FOR_ALL';
   }
-
-  try {
-    const row = await rpc<TestRow>(endpoints.admin.updateTest, {
-      p_test_id: payload.testId,
-      p_title: payload.title,
-      p_description: payload.description,
-      p_duration_minutes: safeDurationMinutes,
-      p_batch_id: payload.batchId ?? null,
-      p_type: payload.type,
-      p_subject: payload.subject,
-      p_scheduled_at: payload.scheduledAt,
-      p_scholarship_admission_class: payload.scholarshipAdmissionClass ?? null,
-      p_scholarship_target_exam: payload.scholarshipTargetExam ?? null,
-      p_is_open_for_all: payload.isOpenForAll ?? false,
-    });
-
-    invalidateAdminCache();
-    return mapTest(row);
-  } catch (error) {
-    const message = error instanceof Error ? error.message.toLowerCase() : '';
-    if (message.includes('parameter') || message.includes('function') || message.includes('schema cache')) {
-      const legacyRow = await rpc<TestRow>(endpoints.admin.updateTest, {
-        p_test_id: payload.testId,
-        p_title: payload.title,
-        p_description: payload.description,
-        p_duration_minutes: safeDurationMinutes,
-        p_batch_id: payload.batchId ?? null,
-        p_type: payload.type,
-        p_subject: payload.subject,
-        p_scheduled_at: payload.scheduledAt,
-        p_scholarship_admission_class: payload.scholarshipAdmissionClass ?? null,
-        p_scholarship_target_exam: payload.scholarshipTargetExam ?? null,
-      });
-
-      invalidateAdminCache();
-      return mapTest(legacyRow);
-    }
-    throw error;
-  }
+  return mapped;
 }
 
 export async function setTestStarted(testId: string, isStarted: boolean): Promise<TestItem> {
-  if (testId.startsWith('pdf_test_')) {
-    await publishPdfNativeTest(testId);
-    const pdfNative = await getPdfNativeTestById(testId);
-    invalidateAdminCache();
-    if (pdfNative) {
-      return mapPdfNativeTestToCbtTestItem(pdfNative);
-    }
-  }
-
   const row = await rpc<TestRow>(endpoints.admin.setTestStarted, {
     p_test_id: testId,
     p_is_started: isStarted,
@@ -543,12 +421,6 @@ export async function approveAdmin(userId: string): Promise<AppUser> {
 }
 
 export async function deleteTest(testId: string) {
-  if (testId.startsWith('pdf_test_')) {
-    await deletePdfNativeTest(testId);
-    invalidateAdminCache();
-    return;
-  }
-
   await rpc<string>(endpoints.admin.deleteTest, {
     p_test_id: testId,
   });
@@ -789,7 +661,8 @@ export async function fetchQuestionSetQuestions(setId: number): Promise<Question
       'id,question,options,type,image_url,correct_answer',
       {
         set_id: `eq.${setId}`,
-        limit: 500,
+        order: 'id.asc',
+        limit: 1000,
       },
     );
   } catch (err) {
@@ -806,7 +679,9 @@ export async function fetchQuestionSetQuestions(setId: number): Promise<Question
     }
   }
 
-  return (rows || []).map((row) => ({
+  const sortedRows = [...(rows || [])].sort((a, b) => Number(a.id) - Number(b.id));
+
+  return sortedRows.map((row) => ({
     id: Number(row.id),
     setId,
     question: row.question,
@@ -828,18 +703,91 @@ export async function createQuestionSet(payload: {
     image_url?: string | null;
   }>;
 }) {
-  return workerRequest<{
-    success: boolean;
-    set_id: number;
-    pdf_name: string;
-    question_count: number;
-  }>('/create-question-set', {
-    method: 'POST',
-    body: JSON.stringify({
+  try {
+    const res = await workerRequest<{
+      success: boolean;
+      set_id: number;
+      pdf_name: string;
+      question_count: number;
+    }>('/create-question-set', {
+      method: 'POST',
+      body: JSON.stringify({
+        pdf_name: payload.pdfName,
+        questions: payload.questions,
+      }),
+    });
+    invalidateAdminCache();
+    return res;
+  } catch (workerErr) {
+    console.warn('[createQuestionSet] Worker request failed, attempting direct Supabase insert:', workerErr);
+
+    let nextSetId = 1;
+    try {
+      const existing = await selectRows<{ set_id: number }>('question_sets', 'set_id', {
+        order: 'set_id.desc',
+        limit: 1,
+      });
+      if (existing && existing.length > 0 && existing[0]?.set_id) {
+        nextSetId = Number(existing[0].set_id) + 1;
+      }
+    } catch {
+      nextSetId = Math.floor(Date.now() / 1000);
+    }
+
+    const insertedSets = await insertRows<{ set_id: number; pdf_name: string; question_count: number }>('question_sets', [
+      {
+        set_id: nextSetId,
+        pdf_name: payload.pdfName,
+        question_count: payload.questions.length,
+      },
+    ]);
+    const setRow = insertedSets[0] ?? {
+      set_id: nextSetId,
       pdf_name: payload.pdfName,
-      questions: payload.questions,
-    }),
+      question_count: payload.questions.length,
+    };
+
+    const qRows = payload.questions.map((q) => ({
+      set_id: setRow.set_id,
+      question: q.question || '',
+      options: q.options || [],
+      correct_answer: q.correct_answer || '',
+      type: q.type || 'mcq',
+      explanation: q.explanation ?? '',
+      image_url: q.image_url || null,
+    }));
+    await insertRows('questions', qRows);
+    invalidateAdminCache();
+    return {
+      success: true,
+      set_id: setRow.set_id,
+      pdf_name: setRow.pdf_name,
+      question_count: setRow.question_count,
+    };
+  }
+}
+
+export async function updateQuestionInSet(payload: {
+  id: number;
+  question: string;
+  options: string[];
+  correct_answer: string;
+  type: 'mcq' | 'integer';
+  explanation?: string;
+  image_url?: string | null;
+}) {
+  const res = await updateRows('questions', {
+    question: payload.question,
+    options: payload.options,
+    correct_answer: payload.correct_answer,
+    type: payload.type,
+    explanation: payload.explanation ?? '',
+    image_url: payload.image_url ?? null,
+  }, {
+    id: `eq.${payload.id}`,
   });
+  invalidateAdminCache();
+  return res;
 }
 
 export async function deleteQuestionSet(setId: number) {

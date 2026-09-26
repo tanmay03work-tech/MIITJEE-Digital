@@ -36,12 +36,6 @@ export type RootStackParamList = {
   GeneralEnquiries: undefined;
   ActivityLogs: undefined;
   AdminDiagnostics: undefined;
-  PdfNativeTestBuilder: undefined;
-  PdfNativeSetManagement: { setId?: string } | undefined;
-  PdfNativeTestCreator: { testId?: string; setId?: string } | undefined;
-  PdfNativeTestManagement: undefined;
-  PdfNativeResult: { attemptId: string; testId?: string };
-  PdfNativeReview: { attemptId: string; testId?: string };
 };
 
 export type RootStackScreenProps<RouteName extends keyof RootStackParamList> =

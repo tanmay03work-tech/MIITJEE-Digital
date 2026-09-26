@@ -32,12 +32,6 @@ import { BatchAccessRequestsScreen } from '../screens/admin/BatchAccessRequestsS
 import { GeneralEnquiriesScreen } from '../screens/admin/GeneralEnquiriesScreen';
 import { ActivityLogsScreen } from '../screens/admin/ActivityLogsScreen';
 import { AdminDiagnosticsScreen } from '../screens/admin/AdminDiagnosticsScreen';
-import { PdfNativeTestBuilderScreen } from '../screens/admin/PdfNativeTestBuilder/PdfNativeTestBuilderScreen';
-import { PdfNativeSetManagementScreen } from '../screens/admin/PdfNativeTestBuilder/PdfNativeSetManagementScreen';
-import { PdfNativeTestCreatorScreen } from '../screens/admin/PdfNativeTestBuilder/PdfNativeTestCreatorScreen';
-import { PdfNativeTestManagementScreen } from '../screens/admin/PdfNativeTestBuilder/PdfNativeTestManagementScreen';
-import { PdfNativeResultScreen } from '../screens/admin/PdfNativeTestBuilder/PdfNativeResultScreen';
-import { PdfNativeReviewScreen } from '../screens/admin/PdfNativeTestBuilder/PdfNativeReviewScreen';
 import { AnimatedSplashScreen } from '../components/common/AnimatedSplashScreen';
 
 import { ExamLinkScreen } from '../screens/tests/ExamLinkScreen';
@@ -187,6 +181,10 @@ export function RootNavigator() {
           <>
             <Stack.Screen name="Auth" component={AuthScreen} />
             <Stack.Screen name="ExamLink" component={ExamLinkScreen} />
+            <Stack.Screen name="TestIntro" component={TestIntroScreen} />
+            <Stack.Screen name="TestAttempt" component={TestAttemptScreen} />
+            <Stack.Screen name="TestResult" component={TestResultScreen} />
+            <Stack.Screen name="ReviewAnswers" component={ReviewAnswersScreen} />
           </>
         ) : showPendingApproval ? (
           <Stack.Screen name="PendingApproval" component={PendingApprovalScreen} />
@@ -216,12 +214,6 @@ export function RootNavigator() {
             <Stack.Screen name="GeneralEnquiries" component={GeneralEnquiriesScreen} />
             <Stack.Screen name="ActivityLogs" component={ActivityLogsScreen} />
             <Stack.Screen name="AdminDiagnostics" component={AdminDiagnosticsScreen} />
-            <Stack.Screen name="PdfNativeTestBuilder" component={PdfNativeTestBuilderScreen} />
-            <Stack.Screen name="PdfNativeSetManagement" component={PdfNativeSetManagementScreen} />
-            <Stack.Screen name="PdfNativeTestCreator" component={PdfNativeTestCreatorScreen} />
-            <Stack.Screen name="PdfNativeTestManagement" component={PdfNativeTestManagementScreen} />
-            <Stack.Screen name="PdfNativeResult" component={PdfNativeResultScreen} />
-            <Stack.Screen name="PdfNativeReview" component={PdfNativeReviewScreen} />
           </>
         )}
       </Stack.Navigator>

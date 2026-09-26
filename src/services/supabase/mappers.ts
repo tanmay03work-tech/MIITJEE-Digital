@@ -258,6 +258,30 @@ export function mapReviewRow(row: ReviewRow): TestAttemptReviewItem {
   const ans = (row.user_answer || '').trim();
   const isUnattempted = row.is_unattempted ?? (ans === '');
 
+  const normUser = ans.replace(/^Option\s+/i, '').trim();
+  const normCorrect = (row.correct_answer || '').trim().replace(/^Option\s+/i, '');
+
+  let isCorrect = Boolean(row.is_correct);
+  if (!isCorrect && !isUnattempted) {
+    if (normUser.toLowerCase() === normCorrect.toLowerCase()) {
+      isCorrect = true;
+    } else if (/^[A-D]$/i.test(normUser) && row.options && row.options.length > 0) {
+      const userOptIndex = normUser.toUpperCase().charCodeAt(0) - 65;
+      const userOptText = (row.options[userOptIndex] || '').trim();
+      if (userOptText.toLowerCase() === normCorrect.toLowerCase()) {
+        isCorrect = true;
+      }
+    } else if (/^[A-D]$/i.test(normCorrect) && row.options && row.options.length > 0) {
+      const corrOptIndex = normCorrect.toUpperCase().charCodeAt(0) - 65;
+      const corrOptText = (row.options[corrOptIndex] || '').trim();
+      if (corrOptText.toLowerCase() === normUser.toLowerCase()) {
+        isCorrect = true;
+      }
+    } else if (!isNaN(Number(normUser)) && !isNaN(Number(normCorrect)) && Number(normUser) === Number(normCorrect)) {
+      isCorrect = true;
+    }
+  }
+
   return {
     questionId: row.question_id,
     testId: row.test_id,
@@ -266,7 +290,7 @@ export function mapReviewRow(row: ReviewRow): TestAttemptReviewItem {
     options: row.options,
     userAnswer: row.user_answer,
     correctAnswer: row.correct_answer,
-    isCorrect: isUnattempted ? false : row.is_correct,
+    isCorrect: isUnattempted ? false : isCorrect,
     isUnattempted,
     explanation: row.explanation,
     imageUrl: normalizeAssetUrl(row.image_url),

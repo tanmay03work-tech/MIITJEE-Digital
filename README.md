@@ -1,34 +1,36 @@
 # MIITJEE Classes
 
-React Native CLI Android-first rebuild of the existing MIITJEE web prototype.
+The current development target is the web app. It uses the shared TypeScript UI in `src/`, React Native Web, Vite, Supabase, and the Cloudflare Worker backend.
 
-## Stack
+## Web development
 
-- React Native CLI
-- React Navigation
-- Zustand
-- Supabase Auth + Postgres
-- React Native Reanimated
+1. Install Node.js 22.11+.
+2. Run `npm install`.
+3. Copy `.env.example` to your local environment and provide the required public configuration.
+4. Run `npm run web:dev`.
+5. Open the local Vite URL shown in the terminal.
 
-## Run
+Useful commands:
 
-1. Install Node.js 22.11+ and JDK 17.
-2. Install dependencies with `npm install`.
-3. Copy `.env.example` into your local env setup and provide real Supabase values.
-4. Apply `supabase/migrations/20260405_backend_rebuild.sql` to your Supabase project.
-5. Configure Google Auth in Supabase with redirect URL `com.miitjee.digital://auth/callback`.
-6. Start an Android emulator in Android Studio Device Manager, or connect a real phone with USB debugging enabled.
-7. Verify the device is visible with `adb devices`.
-8. Run Android with `npm run android`.
+- `npm run web:build` builds the deployable site into `dist/`.
+- `npm run web:preview` previews the production build.
+- `npm run lint` performs the TypeScript check.
+- `npm test` runs Jest tests.
+- `npm run deploy` builds and deploys the Vercel site.
 
-## Build Debug APK
+## Parked platforms
 
-- Run `npm run android:build`
-- Output APK: `android/app/build/outputs/apk/debug/app-debug.apk`
+Android and Windows CBT support are intentionally kept in the repository for later work, but are hidden from VS Code Explorer and search by default. Their source has not been removed.
 
-## Notes
+- Android: `android/`, `scripts/run-android.js`, and `scripts/build-android.js`.
+- Windows CBT: `desktop/` and `dist-electron/`.
 
-- The app keeps the same card-based MIITJEE visual style from the web prototype.
-- API services are centralized under `src/services/api` and talk directly to Supabase.
-- Backend schema, RLS policies, analytics models, and admin RPCs live under [supabase/](./supabase).
-- `npm run android` now checks for a connected emulator or phone first, starts Metro if needed, and configures `adb reverse` automatically for USB-connected phones.
+When mobile work resumes, use the existing `npm run android`, `npm run android:build`, or `npm run desktop:dev` commands. Android compatibility patches now run only with Android commands, so regular web installs stay web-focused.
+
+See [docs/WEB_FIRST_WORKSPACE.md](./docs/WEB_FIRST_WORKSPACE.md) for the workspace layout and how to reveal parked folders.
+
+## Backend
+
+- App data, auth, RLS policies, and database migrations: `supabase/`.
+- Worker endpoints for PDF, assets, CBT, and app updates: `miitjee-backend/`.
+- Shared client data services: `src/services/`.
