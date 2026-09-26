@@ -22,7 +22,12 @@ replay_pid*
 *.tgz
 
 # Build cache variants
+.gradle/
 .gradle-*
+dist-electron/
+.metro-cache/
+.idea/
+*.bundle
 node_modules_old/
 .tmp/
 tmp-native/
