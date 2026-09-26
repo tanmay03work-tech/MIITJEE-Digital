@@ -1,6 +1,5 @@
 const https = require('https');
-
-const SERVICE_ROLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV3dXpkZ2dpbWJiYmZnY2F1emhvIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTM5MTMxNSwiZXhwIjoyMDkwOTY3MzE1fQ.WCCXL2twdvI0BCW2OPR2NeNaV5mnzvDTJa2Fwfqx18o';
+const { SUPABASE_SERVICE_KEY: SERVICE_ROLE_KEY } = require('./supabase-env');
 
 const options = {
   hostname: 'uwuzdggimbbbfgcauzho.supabase.co',

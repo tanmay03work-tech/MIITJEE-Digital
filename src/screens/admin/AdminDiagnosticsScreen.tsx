@@ -1,9 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
-import { Activity, AlertTriangle, CheckCircle2, RefreshCw, RotateCcw, ShieldAlert, Smartphone, WifiOff } from 'lucide-react-native';
+import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { Activity, AlertTriangle, ShieldAlert, Smartphone, WifiOff } from 'lucide-react-native';
 
 import { AppHeader } from '../../components/common/AppHeader';
-import { AnimatedPressable } from '../../components/common/AnimatedPressable';
 import { Badge } from '../../components/common/Badge';
 import { Card } from '../../components/common/Card';
 import { EmptyState } from '../../components/common/EmptyState';
@@ -28,7 +27,7 @@ export interface StudentIssueRecord {
 
 export function AdminDiagnosticsScreen() {
   const user = useAuthStore((state) => state.user);
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = user?.role === 'admin' && user.approvalStatus === 'approved';
   const [issues, setIssues] = useState<StudentIssueRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -38,50 +37,7 @@ export function AdminDiagnosticsScreen() {
       setLoading(true);
       const data = await selectRows<any>('active_exam_sessions', '*');
 
-      if (!data || data.length === 0) {
-        // Fallback / mock sample active issues for admin testing
-        setIssues([
-          {
-            id: 'diag-1',
-            studentId: 'STU-101',
-            studentName: 'Aarav Sharma',
-            examTitle: 'JEE Main Weekly Benchmark #4',
-            status: 'SUBMISSION_PENDING',
-            issueCode: 'SUBMISSION_PENDING',
-            reason: 'Reason: Internet connection lost during final submit; snapshot saved in local storage.',
-            lastSyncAt: new Date(Date.now() - 120000).toISOString(),
-            submissionStatus: 'Pending Background Sync',
-            suggestedAction: 'Click Retry Submission to trigger sync, or Force Submit from server.',
-            deviceInfo: 'Android 14 (Samsung Galaxy S23)',
-          },
-          {
-            id: 'diag-2',
-            studentId: 'STU-102',
-            studentName: 'Rohan Verma',
-            examTitle: 'NEET Practice Test #2',
-            status: 'DEVICE_BLOCKED',
-            issueCode: 'DEVICE_BLOCKED',
-            reason: 'Reason: Device HWID is already registered under student STU-099.',
-            lastSyncAt: new Date(Date.now() - 600000).toISOString(),
-            submissionStatus: 'Blocked',
-            suggestedAction: 'Reset Device Registration to allow login on this phone.',
-            deviceInfo: 'Windows Desktop (Build 22631)',
-          },
-          {
-            id: 'diag-3',
-            studentId: 'STU-103',
-            studentName: 'Ananya Gupta',
-            examTitle: 'Scholarship Test 2026',
-            status: 'RESUME_AVAILABLE',
-            issueCode: 'RESUME_AVAILABLE',
-            reason: 'Reason: App process was killed by OS battery saver during question 42.',
-            lastSyncAt: new Date(Date.now() - 300000).toISOString(),
-            submissionStatus: 'Interrupted (Draft Preserved)',
-            suggestedAction: 'Resume Session on student device.',
-            deviceInfo: 'Android 13 (OnePlus 11)',
-          },
-        ]);
-      } else {
+      if (data && data.length > 0) {
         const mapped: StudentIssueRecord[] = data.map((item: any) => ({
           id: item.id,
           studentId: item.user_id,
@@ -96,6 +52,8 @@ export function AdminDiagnosticsScreen() {
           deviceInfo: item.device_info,
         }));
         setIssues(mapped);
+      } else {
+        setIssues([]);
       }
     } finally {
       setLoading(false);
@@ -106,21 +64,6 @@ export function AdminDiagnosticsScreen() {
   useEffect(() => {
     void fetchDiagnostics();
   }, [fetchDiagnostics]);
-
-  const handleAction = (issue: StudentIssueRecord, actionName: string) => {
-    Alert.alert(
-      `Action: ${actionName}`,
-      `Executed ${actionName} for student ${issue.studentName} (${issue.studentId}) on ${issue.examTitle}.`,
-      [
-        {
-          text: 'OK',
-          onPress: () => {
-            setIssues((current) => current.filter((item) => item.id !== issue.id));
-          },
-        },
-      ],
-    );
-  };
 
   if (!isAdmin) {
     return (
@@ -144,6 +87,7 @@ export function AdminDiagnosticsScreen() {
           keyExtractor={(item) => item.id}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void fetchDiagnostics(); }} />}
           contentContainerStyle={styles.listContent}
+          ListEmptyComponent={!loading ? <EmptyState icon={Activity} title="No active exam issues" description="There are no live sessions requiring admin action." /> : null}
           renderItem={({ item }) => (
             <Card style={styles.card}>
               <View style={styles.cardHeader}>
@@ -184,22 +128,6 @@ export function AdminDiagnosticsScreen() {
 
               <Text style={styles.suggestedActionLabel}>Suggested Action: {item.suggestedAction}</Text>
 
-              <View style={styles.actionRow}>
-                <AnimatedPressable style={styles.actionBtn} onPress={() => handleAction(item, 'Retry Submission')}>
-                  <RefreshCw size={14} color={colors.primary} />
-                  <Text style={styles.actionBtnText}>Retry Submit</Text>
-                </AnimatedPressable>
-
-                <AnimatedPressable style={styles.actionBtn} onPress={() => handleAction(item, 'Force Submit')}>
-                  <CheckCircle2 size={14} color={colors.success} />
-                  <Text style={styles.actionBtnText}>Force Submit</Text>
-                </AnimatedPressable>
-
-                <AnimatedPressable style={styles.actionBtn} onPress={() => handleAction(item, 'Reset Device')}>
-                  <RotateCcw size={14} color={colors.warning} />
-                  <Text style={styles.actionBtnText}>Reset Device</Text>
-                </AnimatedPressable>
-              </View>
             </Card>
           )}
         />
@@ -283,28 +211,5 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     fontStyle: 'italic',
-  },
-  actionRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.xs,
-  },
-  actionBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.sm,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceMuted,
-  },
-  actionBtnText: {
-    color: colors.text,
-    fontSize: 11,
-    fontWeight: '700',
   },
 });

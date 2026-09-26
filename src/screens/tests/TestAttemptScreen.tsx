@@ -26,6 +26,7 @@ import { TestItem, TestQuestion } from '../../types';
 import { getEligibility } from '../../utils/accessControl';
 import { formatExamTextForDisplay } from '../../utils/examText';
 import { formatClock } from '../../utils/formatters';
+import { normalizeNumericAnswer } from '../../utils/numericAnswer';
 import { getTestLockedMessage } from '../../utils/testAvailability';
 import {
   BOOSTER_BATCH_TEST_ITEM,
@@ -627,7 +628,7 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
       if (!currentQuestionId) {
         return;
       }
-      const sanitized = value.replace(/[^0-9.-]/g, '');
+      const sanitized = normalizeNumericAnswer(value, true);
       if (!sanitized) {
         clearResponse(currentQuestionId);
         return;

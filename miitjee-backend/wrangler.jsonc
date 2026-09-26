@@ -34,8 +34,6 @@
   "vars": {
     "ENVIRONMENT": "production",
     "SUPABASE_URL": "https://uwuzdggimbbbfgcauzho.supabase.co",
-    "SUPABASE_SERVICE_KEY": "sb_publishable_2hMbPMAYceagP86WVmzZEQ_BDkMMXLp",
-    "GEMINI_API_KEY": "REMOVED_SECRET",
     "GEMINI_MODEL": "gemini-3.1-flash-lite"
   }
 }

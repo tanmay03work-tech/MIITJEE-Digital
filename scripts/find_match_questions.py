@@ -1,11 +1,9 @@
 import json
 import urllib.request
 import sys
+from supabase_env import SERVICE_ROLE_KEY, SUPABASE_URL
 
 sys.stdout.reconfigure(encoding='utf-8')
-
-SUPABASE_URL = 'https://uwuzdggimbbbfgcauzho.supabase.co'
-SERVICE_ROLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV3dXpkZ2dpbWJiYmZnY2F1emhvIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTM5MTMxNSwiZXhwIjoyMDkwOTY3MzE1fQ.WCCXL2twdvI0BCW2OPR2NeNaV5mnzvDTJa2Fwfqx18o'
 
 test_id = 'ba08beb3-3094-442b-866a-dc7cb8f6a341'
 url = f"{SUPABASE_URL}/rest/v1/test_questions?test_id=eq.{test_id}&order=position.asc&select=*"

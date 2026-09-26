@@ -17,6 +17,7 @@ import {
 } from '../../types';
 import { appEnv, assertWorkerConfig } from '../../config/env';
 import { logError, logInfo, logWarn } from '../../utils/logger';
+import { areNumericAnswersEquivalent, normalizeNumericAnswer } from '../../utils/numericAnswer';
 import { endpoints } from './config';
 import { processVisualPdfImport } from '../pdf/visualPdfImporter';
 import { Platform } from 'react-native';
@@ -424,9 +425,8 @@ async function submitStandardAttemptDirect(payload: SubmitAttemptPayload): Promi
         }
       }
 
-      const isNumSelected = !isNaN(Number(normSelected)) && normSelected.length > 0;
-      const isNumCorrect = !isNaN(Number(normCorrect)) && normCorrect.length > 0;
-      const isNumericMatch = isNumSelected && isNumCorrect && Number(normSelected) === Number(normCorrect);
+      const isIntegerQuestion = q.type === 'integer' || q.integer_answer !== null && q.integer_answer !== undefined;
+      const isNumericMatch = isIntegerQuestion && areNumericAnswersEquivalent(selected, q.integer_answer ?? cleanCorrect);
 
       const isMatch = normSelected === normCorrect || isNumericMatch;
 
@@ -571,12 +571,16 @@ async function submitStandardAttemptDirect(payload: SubmitAttemptPayload): Promi
   };
 }
 
-function normalizeUserAnswerForQuestion(val: string | undefined | null, question: TestQuestion): string {
+export function normalizeUserAnswerForQuestion(val: string | undefined | null, question: TestQuestion): string {
   if (val === undefined || val === null || String(val).trim() === '') {
     return '';
   }
 
   const raw = String(val).trim();
+
+  if (question.type === 'integer') {
+    return normalizeNumericAnswer(raw);
+  }
   const normRaw = raw.replace(/^Option\s+/i, '').trim();
   const cleanCorrect = (question.correctAnswer || (question.integerAnswer !== undefined && question.integerAnswer !== null ? String(question.integerAnswer) : '') || '').trim();
   const normCorrect = cleanCorrect.replace(/^Option\s+/i, '').trim();
