@@ -1040,7 +1040,7 @@ function getGeminiApiKey(env: Env): string {
 	if (key) {
 		return key;
 	}
-	return "REMOVED_SECRET";
+	throw new Error("GEMINI_API_KEY is not configured. Please set GEMINI_API_KEY in Cloudflare Worker secrets or environment variables.");
 }
 
 async function callGeminiPdfImport(pdfBase64: string, env: Env, context?: {
