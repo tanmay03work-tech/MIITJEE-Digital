@@ -22,11 +22,6 @@ import { useAuthStore } from '../../store/authStore';
 import { spacing } from '../../theme';
 import { QuickAction, TestItem } from '../../types';
 import { isTestActive } from '../../utils/testAvailability';
-import {
-  BOOSTER_BATCH_TEST_ITEM,
-  isGrandTest,
-  NAVIGATOR_BATCH_TEST_ITEM,
-} from '../../services/api/publishedGrandTests';
 
 type RootNavigation = NativeStackNavigationProp<RootStackParamList>;
 type HomeFeedSectionType = 'header' | 'continue_learning' | 'recommended_tests' | 'recent_results' | 'leaderboard_preview';
@@ -125,8 +120,7 @@ export function HomeScreen({ navigation }: MainTabScreenProps<'Home'>) {
     const isOldTest = (t: TestItem) =>
       t.id.includes('1163869') ||
       (t.title || '').toLowerCase().includes('11th_morning_physics') ||
-      (t.title || '').toLowerCase().includes('1163869') ||
-      isGrandTest(t.id, t.title);
+      (t.title || '').toLowerCase().includes('1163869');
 
     return tests.filter((t) => !isOldTest(t) && Boolean(t.id));
   }, [tests]);

@@ -29,16 +29,6 @@ import { LeaderboardRow, ResultRow, ReviewRow, StudentInsightsRpcResponse, Submi
 import { PDFDocument } from 'pdf-lib';
 import { uploadExamAsset } from './storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {
-  BOOSTER_BATCH_TEST_ID,
-  BOOSTER_BATCH_TEST_ITEM,
-  getGrandTestQuestions,
-  isBoosterBatchTest,
-  isGrandTest,
-  isNavigatorBatchTest,
-  NAVIGATOR_BATCH_TEST_ID,
-  NAVIGATOR_BATCH_TEST_ITEM,
-} from './publishedGrandTests';
 import { invalidateAdminCache } from './admin';
 const STORAGE_KEYS_STD = {
   ATTEMPTS: '@miitjee:standard_test_attempts',
@@ -233,12 +223,11 @@ export async function fetchTests(): Promise<TestItem[]> {
     }
   }
 
-  // Filter out previous/dummy test artifacts and any stale/duplicate grand tests
+  // Filter out previous/dummy test artifacts
   const isOldTest = (t: TestItem) =>
     t.id.includes('1163869') ||
     (t.title || '').toLowerCase().includes('11th_morning_physics') ||
-    (t.title || '').toLowerCase().includes('1163869') ||
-    isGrandTest(t.id, t.title);
+    (t.title || '').toLowerCase().includes('1163869');
 
   const cleanStandardTests = standardTests.filter((t) => !isOldTest(t));
   return cleanStandardTests;
@@ -249,10 +238,6 @@ function isUuid(id: string): boolean {
 }
 
 export async function fetchQuestions(testId: string, _testTitle?: string): Promise<TestQuestion[]> {
-  if (isGrandTest(testId, _testTitle)) {
-    return getGrandTestQuestions(testId, _testTitle);
-  }
-
   try {
     const rpcRows = await rpc<TestQuestionRow[]>(endpoints.tests.availableQuestions, {
       p_test_id: testId,
@@ -315,50 +300,33 @@ async function submitStandardAttemptDirect(payload: SubmitAttemptPayload): Promi
   let correctMarks = 4;
   let wrongMarks = -1;
 
-  if (isGrandTest(payload.testId)) {
-    const grandQs = getGrandTestQuestions(payload.testId);
-    questionRows = grandQs.map((gq) => ({
-      id: gq.id,
-      correct_answer: gq.correctAnswer || (gq.integerAnswer !== null && gq.integerAnswer !== undefined ? String(gq.integerAnswer) : ''),
-      integer_answer: gq.integerAnswer,
-      prompt: gq.prompt,
-      options: gq.options,
-      explanation: gq.explanation,
-      subjectLabel: gq.subjectLabel,
-      imageUrl: gq.imageUrl,
-      type: gq.type,
-    }));
-    correctMarks = 4;
-    wrongMarks = -1;
-  } else {
-    try {
-      const [fetchedQs, testRows] = await Promise.all([
-        fetchQuestions(payload.testId).catch(() => []),
-        selectRows<TestRow>('tests', '*', { id: `eq.${payload.testId}` }).catch(() => []),
-      ]);
-      const testRow = testRows[0];
-      correctMarks = Number(testRow?.correct_marks) || 4;
-      wrongMarks =
-        testRow?.wrong_marks !== undefined && testRow?.wrong_marks !== null
-          ? -Math.abs(Number(testRow.wrong_marks))
-          : -1;
+  try {
+    const [fetchedQs, testRows] = await Promise.all([
+      fetchQuestions(payload.testId).catch(() => []),
+      selectRows<TestRow>('tests', '*', { id: `eq.${payload.testId}` }).catch(() => []),
+    ]);
+    const testRow = testRows[0];
+    correctMarks = Number(testRow?.correct_marks) || 4;
+    wrongMarks =
+      testRow?.wrong_marks !== undefined && testRow?.wrong_marks !== null
+        ? -Math.abs(Number(testRow.wrong_marks))
+        : -1;
 
-      if (fetchedQs && fetchedQs.length > 0) {
-        questionRows = fetchedQs.map((q) => ({
-          id: q.id,
-          correct_answer: q.correctAnswer || (q.integerAnswer !== null && q.integerAnswer !== undefined ? String(q.integerAnswer) : ''),
-          integer_answer: q.integerAnswer,
-          prompt: q.prompt,
-          options: q.options,
-          explanation: q.explanation,
-          subjectLabel: q.subjectLabel,
-          imageUrl: q.imageUrl,
-          type: q.type,
-        }));
-      }
-    } catch {
-      questionRows = [];
+    if (fetchedQs && fetchedQs.length > 0) {
+      questionRows = fetchedQs.map((q) => ({
+        id: q.id,
+        correct_answer: q.correctAnswer || (q.integerAnswer !== null && q.integerAnswer !== undefined ? String(q.integerAnswer) : ''),
+        integer_answer: q.integerAnswer,
+        prompt: q.prompt,
+        options: q.options,
+        explanation: q.explanation,
+        subjectLabel: q.subjectLabel,
+        imageUrl: q.imageUrl,
+        type: q.type,
+      }));
     }
+  } catch {
+    questionRows = [];
   }
 
   let correctAnswers = 0;
@@ -614,10 +582,6 @@ export function normalizeUserAnswerForQuestion(val: string | undefined | null, q
 }
 
 export async function submitAttempt(payload: SubmitAttemptPayload): Promise<SubmittedTestResponse> {
-  if (isGrandTest(payload.testId)) {
-    return submitStandardAttemptDirect(payload);
-  }
-
   // Pre-normalize answers to ensure every question's UUID is populated and option letters match canonical answer format
   let normalizedAnswers: Record<string, string> = {};
   try {
@@ -1100,21 +1064,6 @@ export async function importQuestionsFromPdf(payload: PdfImportPayload & { provi
 
 export async function resolveExamLink(shareCode: string, userId?: string): Promise<ExamLinkResolution> {
   const cleanCode = shareCode.trim().toUpperCase();
-
-  if (cleanCode === 'NAVIGTR1' || cleanCode === 'NAVIGATOR' || cleanCode.startsWith('A0000000')) {
-    return {
-      status: 'VALID',
-      message: 'Exam link resolved successfully.',
-      test: NAVIGATOR_BATCH_TEST_ITEM,
-    };
-  }
-  if (cleanCode === 'BOOSTER1' || cleanCode === 'BOOSTER' || cleanCode.startsWith('B0000000')) {
-    return {
-      status: 'VALID',
-      message: 'Exam link resolved successfully.',
-      test: BOOSTER_BATCH_TEST_ITEM,
-    };
-  }
 
   try {
     const rpcResult = await rpc<{

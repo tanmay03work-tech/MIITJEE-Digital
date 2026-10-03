@@ -790,6 +790,63 @@ export async function updateQuestionInSet(payload: {
   return res;
 }
 
+export async function addQuestionToSet(payload: {
+  setId: number;
+  question: string;
+  options: string[];
+  correct_answer: string;
+  type: 'mcq' | 'integer';
+  explanation?: string;
+  image_url?: string | null;
+}): Promise<QuestionBankQuestion> {
+  const qRow = {
+    set_id: payload.setId,
+    question: payload.question,
+    options: payload.options,
+    correct_answer: payload.correct_answer,
+    type: payload.type,
+    explanation: payload.explanation ?? '',
+    image_url: payload.image_url ?? null,
+  };
+
+  const inserted = await insertRows<{
+    id: number;
+    set_id: number;
+    question: string;
+    options: string[];
+    correct_answer: string;
+    type: 'mcq' | 'integer';
+    image_url: string | null;
+  }>('questions', [qRow]);
+
+  const insertedRow = inserted && inserted[0];
+
+  try {
+    const existingSets = await selectRows<{ set_id: number; question_count: number }>('question_sets', 'set_id,question_count', {
+      set_id: `eq.${payload.setId}`,
+      limit: 1,
+    });
+    if (existingSets && existingSets[0]) {
+      const currentCount = Number(existingSets[0].question_count) || 0;
+      await updateRows('question_sets', { question_count: currentCount + 1 }, { set_id: `eq.${payload.setId}` });
+    }
+  } catch (err) {
+    console.warn('[addQuestionToSet] Failed to increment question_sets count:', err);
+  }
+
+  invalidateAdminCache();
+
+  return {
+    id: insertedRow ? Number(insertedRow.id) : Date.now(),
+    setId: payload.setId,
+    question: payload.question,
+    options: payload.options,
+    type: payload.type,
+    imageUrl: normalizeAssetUrl(payload.image_url),
+    correctAnswer: payload.correct_answer,
+  };
+}
+
 export async function deleteQuestionSet(setId: number) {
   // 1. Try RPC function delete_question_set in Supabase
   try {

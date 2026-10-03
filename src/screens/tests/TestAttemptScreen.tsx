@@ -28,12 +28,6 @@ import { formatExamTextForDisplay } from '../../utils/examText';
 import { formatClock } from '../../utils/formatters';
 import { normalizeNumericAnswer } from '../../utils/numericAnswer';
 import { getTestLockedMessage } from '../../utils/testAvailability';
-import {
-  BOOSTER_BATCH_TEST_ITEM,
-  isBoosterBatchTest,
-  isNavigatorBatchTest,
-  NAVIGATOR_BATCH_TEST_ITEM,
-} from '../../services/api/publishedGrandTests';
 const MAX_WARNINGS = 3;
 const AUTO_SUBMIT_THRESHOLD = 4;
 const VIOLATION_DEBOUNCE_MS = 2000;
@@ -109,17 +103,7 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
   const loadQuestions = useAppStore((state) => state.loadQuestions);
   const submitAttempt = useAppStore((state) => state.submitAttempt);
   const isSubmitting = useAppStore((state) => state.isSubmitting);
-  const testFromStore = useAppStore((state) => {
-    if (isNavigatorBatchTest(testId)) return NAVIGATOR_BATCH_TEST_ITEM;
-    if (isBoosterBatchTest(testId)) return BOOSTER_BATCH_TEST_ITEM;
-    const found = state.tests.find((candidate) => candidate.id === testId);
-    if (found) {
-      if (isNavigatorBatchTest(found.id, found.title)) return NAVIGATOR_BATCH_TEST_ITEM;
-      if (isBoosterBatchTest(found.id, found.title)) return BOOSTER_BATCH_TEST_ITEM;
-      return found;
-    }
-    return undefined;
-  });
+  const testFromStore = useAppStore((state) => state.tests.find((candidate) => candidate.id === testId));
   const [resolvedTest, setResolvedTest] = useState<TestItem | undefined>(testFromStore);
   const test = testFromStore || resolvedTest;
 

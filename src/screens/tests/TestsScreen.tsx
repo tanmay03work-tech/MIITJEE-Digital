@@ -25,12 +25,6 @@ import { getTestLockedMessage, isTestActive } from '../../utils/testAvailability
 import { useFocusEffect } from '@react-navigation/native';
 import { RefreshControl } from 'react-native';
 
-import {
-  BOOSTER_BATCH_TEST_ITEM,
-  isGrandTest,
-  NAVIGATOR_BATCH_TEST_ITEM,
-} from '../../services/api/publishedGrandTests';
-
 type Filter = 'all' | 'eligible' | 'weekly' | 'scholarship';
 type RootNavigation = NativeStackNavigationProp<RootStackParamList>;
 
@@ -71,8 +65,7 @@ export function TestsScreen() {
     const isOldTest = (t: TestItem) =>
       t.id.includes('1163869') ||
       (t.title || '').toLowerCase().includes('11th_morning_physics') ||
-      (t.title || '').toLowerCase().includes('1163869') ||
-      isGrandTest(t.id, t.title);
+      (t.title || '').toLowerCase().includes('1163869');
 
     return tests.filter((t) => !isOldTest(t) && Boolean(t.id));
   }, [tests]);

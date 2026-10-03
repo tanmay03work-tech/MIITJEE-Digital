@@ -1,5 +1,4 @@
 import { AppUser, TestItem } from '../types';
-import { isGrandTest } from '../services/api/publishedGrandTests';
 
 export function getEligibility(user: AppUser | null, test: TestItem) {
   if (user?.role === 'admin') {
@@ -8,15 +7,6 @@ export function getEligibility(user: AppUser | null, test: TestItem) {
       label: 'Admin Access',
       reason: 'Admins can preview and attempt any published paper.',
       ctaLabel: 'Open Paper',
-    };
-  }
-
-  if (isGrandTest(test.id, test.title)) {
-    return {
-      allowed: true,
-      label: 'Open For All',
-      reason: 'This grand test is open for all students across any batch.',
-      ctaLabel: 'Start Paper',
     };
   }
 

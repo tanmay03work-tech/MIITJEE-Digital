@@ -3,44 +3,16 @@ import { TestItem, TestQuestion } from '../../types';
 export const NAVIGATOR_BATCH_TEST_ID = 'a0000000-0000-0000-0000-000000000075';
 export const BOOSTER_BATCH_TEST_ID = 'b0000000-0000-0000-0000-000000000180';
 
-export function isGrandTest(id?: string | null, title?: string | null): boolean {
-  if (!id && !title) return false;
-  const cleanId = (id || '').toLowerCase();
-  const cleanTitle = (title || '').toLowerCase();
-  return (
-    cleanId === NAVIGATOR_BATCH_TEST_ID.toLowerCase() ||
-    cleanId === BOOSTER_BATCH_TEST_ID.toLowerCase() ||
-    cleanId.includes('navigator') ||
-    cleanId.includes('booster') ||
-    cleanTitle.includes('navigator') ||
-    cleanTitle.includes('booster') ||
-    cleanTitle.includes('75 question') ||
-    cleanTitle.includes('180 question')
-  );
+export function isGrandTest(_id?: string | null, _title?: string | null): boolean {
+  return false;
 }
 
-export function isNavigatorBatchTest(id?: string | null, title?: string | null): boolean {
-  if (!id && !title) return false;
-  const cleanId = (id || '').toLowerCase();
-  const cleanTitle = (title || '').toLowerCase();
-  return (
-    cleanId === NAVIGATOR_BATCH_TEST_ID.toLowerCase() ||
-    cleanId.includes('navigator') ||
-    cleanTitle.includes('navigator') ||
-    cleanTitle.includes('75 question')
-  );
+export function isNavigatorBatchTest(_id?: string | null, _title?: string | null): boolean {
+  return false;
 }
 
-export function isBoosterBatchTest(id?: string | null, title?: string | null): boolean {
-  if (!id && !title) return false;
-  const cleanId = (id || '').toLowerCase();
-  const cleanTitle = (title || '').toLowerCase();
-  return (
-    cleanId === BOOSTER_BATCH_TEST_ID.toLowerCase() ||
-    cleanId.includes('booster') ||
-    cleanTitle.includes('booster') ||
-    cleanTitle.includes('180 question')
-  );
+export function isBoosterBatchTest(_id?: string | null, _title?: string | null): boolean {
+  return false;
 }
 
 export const NAVIGATOR_BATCH_TEST_ITEM: TestItem = {

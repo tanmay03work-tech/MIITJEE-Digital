@@ -27,26 +27,10 @@ import { updateRows } from '../../services/supabase/client';
 import { getTestLockedMessage, getTestStatusLabel, isTestActive } from '../../utils/testAvailability';
 import { fetchExistingAttemptForTest } from '../../services/api/tests';
 import { fetchReattemptStatusForTest, submitReattemptRequest } from '../../services/api/reattemptRequests';
-import {
-  BOOSTER_BATCH_TEST_ITEM,
-  isBoosterBatchTest,
-  isNavigatorBatchTest,
-  NAVIGATOR_BATCH_TEST_ITEM,
-} from '../../services/api/publishedGrandTests';
 
 export function TestIntroScreen({ route, navigation }: RootStackScreenProps<'TestIntro'>) {
   const { testId } = route.params;
-  const test = useAppStore((state) => {
-    if (isNavigatorBatchTest(testId)) return NAVIGATOR_BATCH_TEST_ITEM;
-    if (isBoosterBatchTest(testId)) return BOOSTER_BATCH_TEST_ITEM;
-    const found = state.tests.find((candidate) => candidate.id === testId);
-    if (found) {
-      if (isNavigatorBatchTest(found.id, found.title)) return NAVIGATOR_BATCH_TEST_ITEM;
-      if (isBoosterBatchTest(found.id, found.title)) return BOOSTER_BATCH_TEST_ITEM;
-      return found;
-    }
-    return undefined;
-  });
+  const test = useAppStore((state) => state.tests.find((candidate) => candidate.id === testId));
   const user = useAuthStore((state) => state.user);
   const questionCache = useAppStore((state) => state.questionCache);
   const tests = useAppStore((state) => state.tests);

@@ -1,11 +1,7 @@
 import { TestItem } from '../types';
 import { formatDateTimeLabel } from './formatters';
-import { isGrandTest } from '../services/api/publishedGrandTests';
 
 export function isTestActive(test: Pick<TestItem, 'isStarted' | 'scheduledAt'> & { id?: string; title?: string }, now = Date.now()) {
-  if (isGrandTest(test.id, test.title)) {
-    return true;
-  }
   return test.isStarted || new Date(test.scheduledAt).getTime() <= now;
 }
 

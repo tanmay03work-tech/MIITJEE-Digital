@@ -11,27 +11,11 @@ import { QuestionBodyRenderer } from '../../components/tests/QuestionBodyRendere
 import { useAppStore } from '../../store/appStore';
 import { colors, radius, spacing } from '../../theme';
 import { RootStackScreenProps } from '../../navigation/types';
-import {
-  BOOSTER_BATCH_TEST_ITEM,
-  isBoosterBatchTest,
-  isNavigatorBatchTest,
-  NAVIGATOR_BATCH_TEST_ITEM,
-} from '../../services/api/publishedGrandTests';
 
 export function ReviewAnswersScreen({ route }: RootStackScreenProps<'ReviewAnswers'>) {
   const { resultId, testId } = route.params;
   const loadReview = useAppStore((state) => state.loadReview);
-  const test = useAppStore((state) => {
-    if (isNavigatorBatchTest(testId)) return NAVIGATOR_BATCH_TEST_ITEM;
-    if (isBoosterBatchTest(testId)) return BOOSTER_BATCH_TEST_ITEM;
-    const found = state.tests.find((item) => item.id === testId);
-    if (found) {
-      if (isNavigatorBatchTest(found.id, found.title)) return NAVIGATOR_BATCH_TEST_ITEM;
-      if (isBoosterBatchTest(found.id, found.title)) return BOOSTER_BATCH_TEST_ITEM;
-      return found;
-    }
-    return undefined;
-  });
+  const test = useAppStore((state) => state.tests.find((item) => item.id === testId));
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [review, setReview] = useState<Awaited<ReturnType<typeof loadReview>>>([]);

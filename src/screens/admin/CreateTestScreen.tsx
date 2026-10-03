@@ -1,5 +1,5 @@
 import React, { startTransition, useCallback, useMemo, useState } from 'react';
-import { Alert, FlatList, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, FlatList, Modal, StyleSheet, Text, TextInput, View } from 'react-native';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import DocumentPicker, { isCancel, pickSingle, types } from 'react-native-document-picker';
 import { useFocusEffect } from '@react-navigation/native';
@@ -17,7 +17,18 @@ import { useAuthStore } from '../../store/authStore';
 import { colors, radius, spacing } from '../../theme';
 import { CreateTestQuestionPayload, ScholarshipAdmissionClass, ScholarshipTargetExam, TestType } from '../../types';
 import { RootStackScreenProps } from '../../navigation/types';
-import { FileImage, FolderOpen, Save, ShieldAlert, Trash2 } from 'lucide-react-native';
+import {
+  ArrowUpDown,
+  ChevronDown,
+  ChevronUp,
+  FileImage,
+  FolderOpen,
+  Save,
+  ShieldAlert,
+  Shuffle,
+  Trash2,
+  X,
+} from 'lucide-react-native';
 import { clearExamCreationDraft, loadExamCreationDraft, saveExamCreationDraft } from '../../utils/draftStorage';
 import {
   coerceDurationMinutes,
@@ -120,6 +131,8 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
   const [unattemptedMarks, setUnattemptedMarks] = useState('0');
   const [hasCheckedDraft, setHasCheckedDraft] = useState(false);
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
+  const [reorderingTargetIndex, setReorderingTargetIndex] = useState<number | null>(null);
+  const [targetPositionInput, setTargetPositionInput] = useState('');
 
   const resolvedDurationMinutes = coerceDurationMinutes(durationMinutes);
   const isMultiSubject = subjectMode === 'multi';
@@ -498,17 +511,107 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
     setQuestions((current) => current.filter((_, idx) => idx !== indexToDelete));
   }, []);
 
+  const handleMoveQuestion = useCallback((fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+    if (toIndex < 0 || toIndex >= questions.length) return;
+
+    setQuestions((prev) => {
+      const updated = [...prev];
+      const [moved] = updated.splice(fromIndex, 1);
+      if (!moved) return prev;
+      updated.splice(toIndex, 0, moved);
+      return updated;
+    });
+  }, [questions.length]);
+
+  const handleOpenMoveDialog = useCallback((index: number) => {
+    setReorderingTargetIndex(index);
+    setTargetPositionInput(String(index + 1));
+  }, []);
+
+  const handleConfirmMoveToPosition = useCallback(() => {
+    if (reorderingTargetIndex === null) return;
+    const parsed = parseInt(targetPositionInput.trim(), 10);
+    if (Number.isNaN(parsed) || parsed < 1 || parsed > questions.length) {
+      Alert.alert(
+        'Invalid Position',
+        `Please enter a valid question number between 1 and ${questions.length}.`,
+      );
+      return;
+    }
+    const toIndex = parsed - 1;
+    handleMoveQuestion(reorderingTargetIndex, toIndex);
+    const fromNumber = reorderingTargetIndex + 1;
+    setReorderingTargetIndex(null);
+    setTargetPositionInput('');
+    Alert.alert('Question Moved', `Question ${fromNumber} moved to position ${parsed}.`);
+  }, [handleMoveQuestion, questions.length, reorderingTargetIndex, targetPositionInput]);
+
+  const handleShuffleAll = useCallback(() => {
+    if (questions.length <= 1) return;
+    Alert.alert(
+      'Shuffle All Questions?',
+      `This will randomly randomize the order of all ${questions.length} questions in this paper. You can adjust individual positions afterwards.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Shuffle Order',
+          onPress: () => {
+            setQuestions((prev) => {
+              const shuffled = [...prev];
+              for (let i = shuffled.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                const temp = shuffled[i]!;
+                shuffled[i] = shuffled[j]!;
+                shuffled[j] = temp;
+              }
+              return shuffled;
+            });
+            Alert.alert('Questions Shuffled', 'Questions order has been randomized!');
+          },
+        },
+      ],
+    );
+  }, [questions.length]);
+
   const renderQuestionItem = useCallback(
     ({ item: question, index }: { item: CreateTestQuestionPayload; index: number }) => (
       <View style={styles.formCard}>
         <View style={styles.questionHeaderRow}>
-          <Text style={styles.questionTitle}>Question {index + 1}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <Text style={styles.questionTitle}>Question {index + 1}</Text>
+            {questions.length > 1 ? (
+              <View style={styles.reorderControlsRow}>
+                <AnimatedPressable
+                  style={[styles.reorderArrowButton, index === 0 && styles.reorderButtonDisabled]}
+                  disabled={index === 0}
+                  onPress={() => handleMoveQuestion(index, index - 1)}
+                  accessibilityLabel="Move Question Up">
+                  <ChevronUp size={14} color={index === 0 ? colors.border : colors.text} />
+                </AnimatedPressable>
+                <AnimatedPressable
+                  style={[styles.reorderArrowButton, index === questions.length - 1 && styles.reorderButtonDisabled]}
+                  disabled={index === questions.length - 1}
+                  onPress={() => handleMoveQuestion(index, index + 1)}
+                  accessibilityLabel="Move Question Down">
+                  <ChevronDown size={14} color={index === questions.length - 1 ? colors.border : colors.text} />
+                </AnimatedPressable>
+                <AnimatedPressable
+                  style={styles.reorderJumpButton}
+                  onPress={() => handleOpenMoveDialog(index)}
+                  accessibilityLabel="Move to Position Number">
+                  <ArrowUpDown size={11} color={colors.primary} />
+                  <Text style={styles.reorderJumpButtonText}>Move #</Text>
+                </AnimatedPressable>
+              </View>
+            ) : null}
+          </View>
           {questions.length > 1 ? (
             <AnimatedPressable
               style={styles.deleteQuestionButton}
               onPress={() => handleDeleteQuestion(index)}>
               <Trash2 size={14} color={colors.danger} />
-              <Text style={styles.deleteQuestionButtonText}>Delete Question</Text>
+              <Text style={styles.deleteQuestionButtonText}>Delete</Text>
             </AnimatedPressable>
           ) : null}
         </View>
@@ -914,7 +1017,15 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
               ) : null}
 
               <View style={styles.formCard}>
-                <Text style={styles.sectionTitle}>Questions</Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: spacing.xs }}>
+                  <Text style={styles.sectionTitle}>Questions</Text>
+                  {questions.length > 1 ? (
+                    <AnimatedPressable style={styles.shuffleAllButton} onPress={handleShuffleAll}>
+                      <Shuffle size={13} color={colors.primary} />
+                      <Text style={styles.shuffleAllButtonText}>Shuffle Order</Text>
+                    </AnimatedPressable>
+                  ) : null}
+                </View>
                 <Text style={styles.fileHint}>
                   Reuse saved PDF sets from the question bank or add questions manually. Current count: {nonBlankQuestionCount}
                 </Text>
@@ -932,6 +1043,88 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
           }
           ListFooterComponent={<View style={{ height: listBottomInset }} />}
         />
+
+        {/* Move / Jump Question Position Modal */}
+        <Modal
+          visible={reorderingTargetIndex !== null}
+          animationType="fade"
+          transparent
+          onRequestClose={() => setReorderingTargetIndex(null)}>
+          <View style={styles.moveModalOverlay}>
+            <View style={styles.moveModalCard}>
+              <View style={styles.moveModalHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <ArrowUpDown size={18} color={colors.primary} />
+                  <Text style={styles.moveModalTitle}>
+                    Move Question {reorderingTargetIndex !== null ? reorderingTargetIndex + 1 : ''}
+                  </Text>
+                </View>
+                <AnimatedPressable onPress={() => setReorderingTargetIndex(null)}>
+                  <X size={18} color={colors.textMuted} />
+                </AnimatedPressable>
+              </View>
+
+              <Text style={styles.moveModalHint}>
+                Enter target position (1 to {questions.length}). Other questions will automatically shift.
+              </Text>
+
+              <View style={styles.moveInputRow}>
+                <Text style={styles.moveInputPrefix}>New Position:</Text>
+                <TextInput
+                  style={styles.moveNumberInput}
+                  keyboardType="number-pad"
+                  value={targetPositionInput}
+                  onChangeText={setTargetPositionInput}
+                  placeholder="e.g. 10"
+                  placeholderTextColor={colors.textMuted}
+                  autoFocus
+                  selectTextOnFocus
+                />
+              </View>
+
+              {/* Quick jump presets */}
+              <View style={styles.movePresetsRow}>
+                <AnimatedPressable
+                  style={styles.movePresetChip}
+                  onPress={() => setTargetPositionInput('1')}>
+                  <Text style={styles.movePresetChipText}>Top (#1)</Text>
+                </AnimatedPressable>
+                {reorderingTargetIndex !== null && reorderingTargetIndex > 0 ? (
+                  <AnimatedPressable
+                    style={styles.movePresetChip}
+                    onPress={() => setTargetPositionInput(String(reorderingTargetIndex))}>
+                    <Text style={styles.movePresetChipText}>Up 1 (#{reorderingTargetIndex})</Text>
+                  </AnimatedPressable>
+                ) : null}
+                {reorderingTargetIndex !== null && reorderingTargetIndex < questions.length - 1 ? (
+                  <AnimatedPressable
+                    style={styles.movePresetChip}
+                    onPress={() => setTargetPositionInput(String(reorderingTargetIndex + 2))}>
+                    <Text style={styles.movePresetChipText}>Down 1 (#{reorderingTargetIndex + 2})</Text>
+                  </AnimatedPressable>
+                ) : null}
+                <AnimatedPressable
+                  style={styles.movePresetChip}
+                  onPress={() => setTargetPositionInput(String(questions.length))}>
+                  <Text style={styles.movePresetChipText}>Bottom (#{questions.length})</Text>
+                </AnimatedPressable>
+              </View>
+
+              <View style={styles.moveModalFooter}>
+                <AnimatedPressable
+                  style={styles.moveCancelButton}
+                  onPress={() => setReorderingTargetIndex(null)}>
+                  <Text style={styles.moveCancelButtonText}>Cancel</Text>
+                </AnimatedPressable>
+                <AnimatedPressable
+                  style={styles.moveConfirmButton}
+                  onPress={handleConfirmMoveToPosition}>
+                  <Text style={styles.moveConfirmButtonText}>Move Position</Text>
+                </AnimatedPressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
 
         <View
           style={[
@@ -1208,5 +1401,160 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 14,
     fontWeight: '700',
+  },
+  reorderControlsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.surfaceMuted,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+  },
+  reorderArrowButton: {
+    padding: 3,
+    borderRadius: radius.sm,
+  },
+  reorderButtonDisabled: {
+    opacity: 0.3,
+  },
+  reorderJumpButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: radius.sm,
+    backgroundColor: colors.primarySoft,
+  },
+  reorderJumpButtonText: {
+    color: colors.primary,
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  shuffleAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.primarySoft,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+  },
+  shuffleAllButtonText: {
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  moveModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.xl,
+  },
+  moveModalCard: {
+    width: '100%',
+    maxWidth: 380,
+    backgroundColor: colors.surface,
+    borderRadius: radius.xl,
+    padding: spacing.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  moveModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.xs,
+  },
+  moveModalTitle: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  moveModalHint: {
+    color: colors.textMuted,
+    fontSize: 12,
+    lineHeight: 16,
+    marginBottom: spacing.md,
+  },
+  moveInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  moveInputPrefix: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  moveNumberInput: {
+    flex: 1,
+    height: 44,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.text,
+    backgroundColor: colors.background,
+    textAlign: 'center',
+  },
+  movePresetsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    marginBottom: spacing.lg,
+  },
+  movePresetChip: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  movePresetChipText: {
+    color: colors.text,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  moveModalFooter: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  moveCancelButton: {
+    flex: 1,
+    height: 40,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  moveCancelButtonText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  moveConfirmButton: {
+    flex: 1.4,
+    height: 40,
+    borderRadius: radius.md,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  moveConfirmButtonText: {
+    color: colors.white,
+    fontSize: 13,
+    fontWeight: '800',
   },
 });

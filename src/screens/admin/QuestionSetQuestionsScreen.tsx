@@ -17,11 +17,16 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import DocumentPicker, { isCancel, pickSingle, types } from 'react-native-document-picker';
 import {
+  ArrowUpDown,
   Check,
   CheckSquare,
+  ChevronDown,
+  ChevronUp,
   Edit3,
   ImageIcon,
+  Plus,
   ShieldAlert,
+  Shuffle,
   Sparkles,
   Square,
   Trash2,
@@ -39,27 +44,33 @@ import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
 import { colors, radius, spacing } from '../../theme';
 import { CreateTestQuestionPayload, QuestionBankQuestion, QuestionType } from '../../types';
-import { updateQuestionInSet } from '../../services/api/admin';
+import { addQuestionToSet, updateQuestionInSet } from '../../services/api/admin';
 import { uploadExamAsset } from '../../services/api/storage';
 import { formatExamTextForDisplay } from '../../utils/examText';
 
 interface QuestionSetQuestionCardProps {
   index: number;
+  totalQuestions: number;
   item: QuestionBankQuestion;
   mode: 'manage' | 'picker';
   selectionIndex?: number;
   onToggleSelection: (question: QuestionBankQuestion) => void;
   onEditQuestion: (question: QuestionBankQuestion, index: number) => void;
+  onMoveQuestion: (fromIndex: number, toIndex: number) => void;
+  onOpenMoveDialog: (index: number) => void;
 }
 
 const QuestionSetQuestionCard = memo(
   function QuestionSetQuestionCard({
     index,
+    totalQuestions,
     item,
     mode,
     selectionIndex,
     onToggleSelection,
     onEditQuestion,
+    onMoveQuestion,
+    onOpenMoveDialog,
   }: QuestionSetQuestionCardProps) {
     const formattedQuestion = useMemo(() => formatExamTextForDisplay(item.question), [item.question]);
     const formattedOptions = useMemo(
@@ -74,8 +85,36 @@ const QuestionSetQuestionCard = memo(
     return (
       <Card style={styles.questionCard}>
         <View style={styles.questionHeader}>
-          <Text style={styles.questionIndex}>Q{index + 1}</Text>
-          <Text style={styles.questionType}>{item.type.toUpperCase()}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', flex: 1 }}>
+            <Text style={styles.questionIndex}>Q{index + 1}</Text>
+            <Text style={styles.questionType}>{item.type.toUpperCase()}</Text>
+
+            {mode === 'manage' && totalQuestions > 1 ? (
+              <View style={styles.reorderControlsRow}>
+                <AnimatedPressable
+                  style={[styles.reorderArrowButton, index === 0 && styles.reorderButtonDisabled]}
+                  disabled={index === 0}
+                  onPress={() => onMoveQuestion(index, index - 1)}
+                  accessibilityLabel="Move Question Up">
+                  <ChevronUp size={14} color={index === 0 ? colors.border : colors.text} />
+                </AnimatedPressable>
+                <AnimatedPressable
+                  style={[styles.reorderArrowButton, index === totalQuestions - 1 && styles.reorderButtonDisabled]}
+                  disabled={index === totalQuestions - 1}
+                  onPress={() => onMoveQuestion(index, index + 1)}
+                  accessibilityLabel="Move Question Down">
+                  <ChevronDown size={14} color={index === totalQuestions - 1 ? colors.border : colors.text} />
+                </AnimatedPressable>
+                <AnimatedPressable
+                  style={styles.reorderJumpButton}
+                  onPress={() => onOpenMoveDialog(index)}
+                  accessibilityLabel="Move to Position Number">
+                  <ArrowUpDown size={11} color={colors.primary} />
+                  <Text style={styles.reorderJumpButtonText}>Move #</Text>
+                </AnimatedPressable>
+              </View>
+            ) : null}
+          </View>
 
           {mode === 'manage' ? (
             <AnimatedPressable
@@ -162,6 +201,7 @@ const QuestionSetQuestionCard = memo(
   },
   (previous, next) =>
     previous.index === next.index &&
+    previous.totalQuestions === next.totalQuestions &&
     previous.item === next.item &&
     previous.mode === next.mode &&
     previous.selectionIndex === next.selectionIndex,
@@ -183,8 +223,13 @@ export function QuestionSetQuestionsScreen({ navigation, route }: RootStackScree
   const [isLoading, setIsLoading] = useState(false);
   const [questions, setQuestions] = useState<QuestionBankQuestion[]>([]);
 
-  // Edit question modal state
+  // Reorder modal state
+  const [reorderingTargetIndex, setReorderingTargetIndex] = useState<number | null>(null);
+  const [targetPositionInput, setTargetPositionInput] = useState('');
+
+  // Edit / Add question modal state
   const [editingTarget, setEditingTarget] = useState<{ question: QuestionBankQuestion; index: number } | null>(null);
+  const [isAddingQuestion, setIsAddingQuestion] = useState(false);
   const [editPrompt, setEditPrompt] = useState('');
   const [editType, setEditType] = useState<QuestionType>('mcq');
   const [editOptions, setEditOptions] = useState<string[]>(['', '', '', '']);
@@ -308,7 +353,7 @@ export function QuestionSetQuestionsScreen({ navigation, route }: RootStackScree
       return;
     }
 
-    const sortedQuestions = [...questions].sort((a, b) => Number(a.id) - Number(b.id));
+    const sortedQuestions = [...questions];
     const draftQuestions: CreateTestQuestionPayload[] = sortedQuestions.map((q) => {
       let prompt = (q.question || '').trim();
       if (!prompt && q.imageUrl) {
@@ -362,7 +407,24 @@ export function QuestionSetQuestionsScreen({ navigation, route }: RootStackScree
     navigation.navigate('CreateTest');
   }, [navigation, queueDraftQuestions, questions]);
 
+  const handleOpenAddQuestion = useCallback(() => {
+    setEditingTarget(null);
+    setIsAddingQuestion(true);
+    setEditPrompt('');
+    setEditType('mcq');
+    setEditOptions(['', '', '', '']);
+    setEditCorrectAnswer('A');
+    setEditExplanation('');
+    setEditImageUrl(null);
+  }, []);
+
+  const handleCloseModal = useCallback(() => {
+    setEditingTarget(null);
+    setIsAddingQuestion(false);
+  }, []);
+
   const handleOpenEdit = useCallback((q: QuestionBankQuestion, idx: number) => {
+    setIsAddingQuestion(false);
     setEditingTarget({ question: q, index: idx });
     setEditPrompt(q.question);
     setEditType(q.type);
@@ -373,49 +435,75 @@ export function QuestionSetQuestionsScreen({ navigation, route }: RootStackScree
   }, []);
 
   const handleSaveEdit = async () => {
-    if (!editingTarget) return;
+    if (!editingTarget && !isAddingQuestion) return;
 
     if (!editPrompt.trim()) {
       Alert.alert('Prompt required', 'Question prompt cannot be empty.');
       return;
     }
 
+    if (editType === 'mcq' && !editCorrectAnswer) {
+      Alert.alert('Answer required', 'Please select a correct option (A, B, C, or D).');
+      return;
+    }
+
+    if (editType === 'integer' && !editCorrectAnswer.trim()) {
+      Alert.alert('Answer required', 'Please enter the correct numeric value.');
+      return;
+    }
+
     setIsSavingEdit(true);
     try {
-      const qId = editingTarget.question.id;
       const formattedOptions = editType === 'mcq' ? editOptions.map((o) => o.trim()) : [];
       const formattedAnswer = editCorrectAnswer.trim().toUpperCase();
 
-      await updateQuestionInSet({
-        id: Number(qId),
-        question: editPrompt.trim(),
-        options: formattedOptions,
-        correct_answer: formattedAnswer,
-        type: editType,
-        explanation: editExplanation.trim(),
-        image_url: editImageUrl,
-      });
+      if (isAddingQuestion) {
+        const created = await addQuestionToSet({
+          setId,
+          question: editPrompt.trim(),
+          options: formattedOptions,
+          correct_answer: formattedAnswer,
+          type: editType,
+          explanation: editExplanation.trim(),
+          image_url: editImageUrl,
+        });
 
-      // Update in local state
-      setQuestions((prev) =>
-        prev.map((item, idx) =>
-          idx === editingTarget.index
-            ? {
-                ...item,
-                question: editPrompt.trim(),
-                options: formattedOptions,
-                correctAnswer: formattedAnswer,
-                type: editType,
-                imageUrl: editImageUrl,
-              }
-            : item,
-        ),
-      );
+        setQuestions((prev) => [...prev, created]);
+        setIsAddingQuestion(false);
+        Alert.alert('Question Added', 'Extra question added to Question Bank set successfully!');
+      } else if (editingTarget) {
+        const qId = editingTarget.question.id;
+        await updateQuestionInSet({
+          id: Number(qId),
+          question: editPrompt.trim(),
+          options: formattedOptions,
+          correct_answer: formattedAnswer,
+          type: editType,
+          explanation: editExplanation.trim(),
+          image_url: editImageUrl,
+        });
 
-      setEditingTarget(null);
-      Alert.alert('Question Updated', 'Changes saved to database successfully!');
+        // Update in local state
+        setQuestions((prev) =>
+          prev.map((item, idx) =>
+            idx === editingTarget.index
+              ? {
+                  ...item,
+                  question: editPrompt.trim(),
+                  options: formattedOptions,
+                  correctAnswer: formattedAnswer,
+                  type: editType,
+                  imageUrl: editImageUrl,
+                }
+              : item,
+          ),
+        );
+
+        setEditingTarget(null);
+        Alert.alert('Question Updated', 'Changes saved to database successfully!');
+      }
     } catch (error) {
-      Alert.alert('Update Failed', error instanceof Error ? error.message : 'Unable to update question.');
+      Alert.alert('Save Failed', error instanceof Error ? error.message : 'Unable to save question.');
     } finally {
       setIsSavingEdit(false);
     }
@@ -434,18 +522,92 @@ export function QuestionSetQuestionsScreen({ navigation, route }: RootStackScree
   );
   const selectedCount = questionBankSelection.length;
 
+  const handleMoveQuestion = useCallback((fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+    if (toIndex < 0 || toIndex >= questions.length) return;
+
+    setQuestions((prev) => {
+      const updated = [...prev];
+      const [moved] = updated.splice(fromIndex, 1);
+      if (!moved) return prev;
+      updated.splice(toIndex, 0, moved);
+      return updated;
+    });
+  }, [questions.length]);
+
+  const handleOpenMoveDialog = useCallback((index: number) => {
+    setReorderingTargetIndex(index);
+    setTargetPositionInput(String(index + 1));
+  }, []);
+
+  const handleConfirmMoveToPosition = useCallback(() => {
+    if (reorderingTargetIndex === null) return;
+    const parsed = parseInt(targetPositionInput.trim(), 10);
+    if (Number.isNaN(parsed) || parsed < 1 || parsed > questions.length) {
+      Alert.alert(
+        'Invalid Position',
+        `Please enter a valid question number between 1 and ${questions.length}.`,
+      );
+      return;
+    }
+    const toIndex = parsed - 1;
+    handleMoveQuestion(reorderingTargetIndex, toIndex);
+    const fromNumber = reorderingTargetIndex + 1;
+    setReorderingTargetIndex(null);
+    setTargetPositionInput('');
+    Alert.alert('Question Moved', `Question ${fromNumber} moved to position ${parsed}.`);
+  }, [handleMoveQuestion, questions.length, reorderingTargetIndex, targetPositionInput]);
+
+  const handleShuffleAll = useCallback(() => {
+    if (questions.length <= 1) return;
+    Alert.alert(
+      'Shuffle All Questions?',
+      `This will randomize the order of all ${questions.length} questions in this set. You can adjust individual positions afterwards.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Shuffle Order',
+          onPress: () => {
+            setQuestions((prev) => {
+              const shuffled = [...prev];
+              for (let i = shuffled.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                const temp = shuffled[i]!;
+                shuffled[i] = shuffled[j]!;
+                shuffled[j] = temp;
+              }
+              return shuffled;
+            });
+            Alert.alert('Questions Shuffled', 'Questions order has been randomized!');
+          },
+        },
+      ],
+    );
+  }, [questions.length]);
+
   const renderQuestionItem = useCallback(
     ({ item, index }: { item: QuestionBankQuestion; index: number }) => (
       <QuestionSetQuestionCard
         index={index}
+        totalQuestions={questions.length}
         item={item}
         mode={mode}
         selectionIndex={selectionOrder.get(item.id)}
         onToggleSelection={handleToggleSelection}
         onEditQuestion={handleOpenEdit}
+        onMoveQuestion={handleMoveQuestion}
+        onOpenMoveDialog={handleOpenMoveDialog}
       />
     ),
-    [handleOpenEdit, handleToggleSelection, mode, selectionOrder],
+    [
+      handleMoveQuestion,
+      handleOpenEdit,
+      handleOpenMoveDialog,
+      handleToggleSelection,
+      mode,
+      questions.length,
+      selectionOrder,
+    ],
   );
 
   if (!isAdmin) {
@@ -477,27 +639,67 @@ export function QuestionSetQuestionsScreen({ navigation, route }: RootStackScree
           ListHeaderComponent={
             <>
               <AppHeader title={`Set ${setId}`} subtitle={setName} showLogo={false} />
-              {mode === 'manage' && questions.length > 0 ? (
+              {mode === 'manage' ? (
                 <Card style={styles.selectionCard}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <View style={{ flex: 1, paddingRight: spacing.xs }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: spacing.sm }}>
+                    <View style={{ flex: 1, minWidth: 160, paddingRight: spacing.xs }}>
                       <Text style={styles.selectionTitle}>{questions.length} Questions in this Set</Text>
-                      <Text style={styles.selectionHint}>Quickly prefill and create an official exam using all questions from this set.</Text>
+                      <Text style={styles.selectionHint}>Manage questions, add extra questions, or prefill and create an official exam.</Text>
                     </View>
-                    <AnimatedPressable
-                      style={{
-                        backgroundColor: colors.primary,
-                        paddingHorizontal: spacing.md,
-                        paddingVertical: spacing.sm,
-                        borderRadius: radius.md,
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: 6,
-                      }}
-                      onPress={handleCreateTestFromSet}>
-                      <Sparkles size={15} color={colors.white} />
-                      <Text style={{ color: colors.white, fontWeight: '700', fontSize: 13 }}>Create Exam</Text>
-                    </AnimatedPressable>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      {questions.length > 1 ? (
+                        <AnimatedPressable
+                          style={{
+                            backgroundColor: colors.surfaceRaised,
+                            borderWidth: 1,
+                            borderColor: colors.border,
+                            paddingHorizontal: spacing.md,
+                            paddingVertical: spacing.sm,
+                            borderRadius: radius.md,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 6,
+                          }}
+                          onPress={handleShuffleAll}>
+                          <Shuffle size={14} color={colors.primary} />
+                          <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>Shuffle</Text>
+                        </AnimatedPressable>
+                      ) : null}
+
+                      <AnimatedPressable
+                        style={{
+                          backgroundColor: colors.surfaceRaised,
+                          borderWidth: 1,
+                          borderColor: colors.primary,
+                          paddingHorizontal: spacing.md,
+                          paddingVertical: spacing.sm,
+                          borderRadius: radius.md,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 6,
+                        }}
+                        onPress={handleOpenAddQuestion}>
+                        <Plus size={15} color={colors.primary} />
+                        <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13 }}>Add Question</Text>
+                      </AnimatedPressable>
+
+                      {questions.length > 0 ? (
+                        <AnimatedPressable
+                          style={{
+                            backgroundColor: colors.primary,
+                            paddingHorizontal: spacing.md,
+                            paddingVertical: spacing.sm,
+                            borderRadius: radius.md,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 6,
+                          }}
+                          onPress={handleCreateTestFromSet}>
+                          <Sparkles size={15} color={colors.white} />
+                          <Text style={{ color: colors.white, fontWeight: '700', fontSize: 13 }}>Create Exam</Text>
+                        </AnimatedPressable>
+                      ) : null}
+                    </View>
                   </View>
                 </Card>
               ) : null}
@@ -571,20 +773,26 @@ export function QuestionSetQuestionsScreen({ navigation, route }: RootStackScree
           </View>
         ) : null}
 
-        {/* Edit Question Modal */}
+        {/* Edit / Add Question Modal */}
         <Modal
-          visible={editingTarget !== null}
+          visible={editingTarget !== null || isAddingQuestion}
           animationType="slide"
           transparent
-          onRequestClose={() => setEditingTarget(null)}>
+          onRequestClose={handleCloseModal}>
           <View style={styles.modalOverlay}>
             <View style={styles.modalContainer}>
               <View style={styles.modalHeader}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>
-                  <Edit3 size={18} color={colors.primary} />
-                  <Text style={styles.modalTitle}>Edit Question</Text>
+                  {isAddingQuestion ? (
+                    <Plus size={18} color={colors.primary} />
+                  ) : (
+                    <Edit3 size={18} color={colors.primary} />
+                  )}
+                  <Text style={styles.modalTitle}>
+                    {isAddingQuestion ? 'Add Extra Question' : 'Edit Question'}
+                  </Text>
                 </View>
-                <AnimatedPressable style={styles.modalCloseButton} onPress={() => setEditingTarget(null)}>
+                <AnimatedPressable style={styles.modalCloseButton} onPress={handleCloseModal}>
                   <X size={18} color={colors.textMuted} />
                 </AnimatedPressable>
               </View>
@@ -715,7 +923,7 @@ export function QuestionSetQuestionsScreen({ navigation, route }: RootStackScree
               </ScrollView>
 
               <View style={styles.modalFooter}>
-                <AnimatedPressable style={styles.modalCancelButton} onPress={() => setEditingTarget(null)}>
+                <AnimatedPressable style={styles.modalCancelButton} onPress={handleCloseModal}>
                   <Text style={styles.modalCancelButtonText}>Cancel</Text>
                 </AnimatedPressable>
                 <AnimatedPressable
@@ -724,10 +932,96 @@ export function QuestionSetQuestionsScreen({ navigation, route }: RootStackScree
                   disabled={isSavingEdit}>
                   {isSavingEdit ? (
                     <ActivityIndicator size="small" color={colors.white} />
+                  ) : isAddingQuestion ? (
+                    <Plus size={16} color={colors.white} />
                   ) : (
                     <Check size={16} color={colors.white} />
                   )}
-                  <Text style={styles.modalSaveButtonText}>Save Changes</Text>
+                  <Text style={styles.modalSaveButtonText}>
+                    {isAddingQuestion ? 'Add to Set' : 'Save Changes'}
+                  </Text>
+                </AnimatedPressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Move / Jump Question Position Modal */}
+        <Modal
+          visible={reorderingTargetIndex !== null}
+          animationType="fade"
+          transparent
+          onRequestClose={() => setReorderingTargetIndex(null)}>
+          <View style={styles.moveModalOverlay}>
+            <View style={styles.moveModalCard}>
+              <View style={styles.moveModalHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <ArrowUpDown size={18} color={colors.primary} />
+                  <Text style={styles.moveModalTitle}>
+                    Move Question {reorderingTargetIndex !== null ? reorderingTargetIndex + 1 : ''}
+                  </Text>
+                </View>
+                <AnimatedPressable onPress={() => setReorderingTargetIndex(null)}>
+                  <X size={18} color={colors.textMuted} />
+                </AnimatedPressable>
+              </View>
+
+              <Text style={styles.moveModalHint}>
+                Enter target position (1 to {questions.length}). Other questions will automatically shift.
+              </Text>
+
+              <View style={styles.moveInputRow}>
+                <Text style={styles.moveInputPrefix}>New Position:</Text>
+                <TextInput
+                  style={styles.moveNumberInput}
+                  keyboardType="number-pad"
+                  value={targetPositionInput}
+                  onChangeText={setTargetPositionInput}
+                  placeholder="e.g. 10"
+                  placeholderTextColor={colors.textMuted}
+                  autoFocus
+                  selectTextOnFocus
+                />
+              </View>
+
+              {/* Quick jump presets */}
+              <View style={styles.movePresetsRow}>
+                <AnimatedPressable
+                  style={styles.movePresetChip}
+                  onPress={() => setTargetPositionInput('1')}>
+                  <Text style={styles.movePresetChipText}>Top (#1)</Text>
+                </AnimatedPressable>
+                {reorderingTargetIndex !== null && reorderingTargetIndex > 0 ? (
+                  <AnimatedPressable
+                    style={styles.movePresetChip}
+                    onPress={() => setTargetPositionInput(String(reorderingTargetIndex))}>
+                    <Text style={styles.movePresetChipText}>Up 1 (#{reorderingTargetIndex})</Text>
+                  </AnimatedPressable>
+                ) : null}
+                {reorderingTargetIndex !== null && reorderingTargetIndex < questions.length - 1 ? (
+                  <AnimatedPressable
+                    style={styles.movePresetChip}
+                    onPress={() => setTargetPositionInput(String(reorderingTargetIndex + 2))}>
+                    <Text style={styles.movePresetChipText}>Down 1 (#{reorderingTargetIndex + 2})</Text>
+                  </AnimatedPressable>
+                ) : null}
+                <AnimatedPressable
+                  style={styles.movePresetChip}
+                  onPress={() => setTargetPositionInput(String(questions.length))}>
+                  <Text style={styles.movePresetChipText}>Bottom (#{questions.length})</Text>
+                </AnimatedPressable>
+              </View>
+
+              <View style={styles.moveModalFooter}>
+                <AnimatedPressable
+                  style={styles.moveCancelButton}
+                  onPress={() => setReorderingTargetIndex(null)}>
+                  <Text style={styles.moveCancelButtonText}>Cancel</Text>
+                </AnimatedPressable>
+                <AnimatedPressable
+                  style={styles.moveConfirmButton}
+                  onPress={handleConfirmMoveToPosition}>
+                  <Text style={styles.moveConfirmButtonText}>Move Position</Text>
                 </AnimatedPressable>
               </View>
             </View>
@@ -1167,5 +1461,146 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.6,
+  },
+  reorderControlsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.surfaceMuted,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+  },
+  reorderArrowButton: {
+    padding: 3,
+    borderRadius: radius.sm,
+  },
+  reorderButtonDisabled: {
+    opacity: 0.3,
+  },
+  reorderJumpButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: radius.sm,
+    backgroundColor: colors.primarySoft,
+  },
+  reorderJumpButtonText: {
+    color: colors.primary,
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  moveModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.xl,
+  },
+  moveModalCard: {
+    width: '100%',
+    maxWidth: 380,
+    backgroundColor: colors.surface,
+    borderRadius: radius.xl,
+    padding: spacing.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  moveModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.xs,
+  },
+  moveModalTitle: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  moveModalHint: {
+    color: colors.textMuted,
+    fontSize: 12,
+    lineHeight: 16,
+    marginBottom: spacing.md,
+  },
+  moveInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  moveInputPrefix: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  moveNumberInput: {
+    flex: 1,
+    height: 44,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.text,
+    backgroundColor: colors.background,
+    textAlign: 'center',
+  },
+  movePresetsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    marginBottom: spacing.lg,
+  },
+  movePresetChip: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  movePresetChipText: {
+    color: colors.text,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  moveModalFooter: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  moveCancelButton: {
+    flex: 1,
+    height: 40,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  moveCancelButtonText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  moveConfirmButton: {
+    flex: 1.4,
+    height: 40,
+    borderRadius: radius.md,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  moveConfirmButtonText: {
+    color: colors.white,
+    fontSize: 13,
+    fontWeight: '800',
   },
 });

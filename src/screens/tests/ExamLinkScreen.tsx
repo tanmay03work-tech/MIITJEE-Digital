@@ -13,7 +13,6 @@ import { resolveExamLink } from '../../services/api/tests';
 import { useAuthStore } from '../../store/authStore';
 import { colors, radius, spacing } from '../../theme';
 import { ExamLinkResolution, TestItem } from '../../types';
-import { isGrandTest } from '../../services/api/publishedGrandTests';
 
 export function ExamLinkScreen({ route, navigation }: RootStackScreenProps<'ExamLink'>) {
   const shareCode = route?.params?.shareCode || '';
@@ -64,7 +63,7 @@ export function ExamLinkScreen({ route, navigation }: RootStackScreenProps<'Exam
   }
 
   const test: TestItem | undefined = resolution?.test;
-  const isOpenExam = test?.isOpenForAll || isGrandTest(test?.id, test?.title);
+  const isOpenExam = Boolean(test?.isOpenForAll);
 
   // Requirement: Authentication Required for batch-restricted tests only
   if (!user && !isOpenExam) {

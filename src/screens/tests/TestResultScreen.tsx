@@ -16,13 +16,6 @@ import {
   getLocalStandardAttempt,
   getLocalStandardAttemptByTestId,
 } from '../../services/api/tests';
-import {
-  BOOSTER_BATCH_TEST_ITEM,
-  isBoosterBatchTest,
-  isGrandTest,
-  isNavigatorBatchTest,
-  NAVIGATOR_BATCH_TEST_ITEM,
-} from '../../services/api/publishedGrandTests';
 import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
 import { colors, radius, spacing } from '../../theme';
@@ -60,17 +53,7 @@ export function TestResultScreen({ route, navigation }: RootStackScreenProps<'Te
   const loadLeaderboard = useAppStore((state) => state.loadLeaderboard);
   const loadQuestions = useAppStore((state) => state.loadQuestions);
   const bootstrap = useAppStore((state) => state.bootstrap);
-  const test = useAppStore((state) => {
-    if (isNavigatorBatchTest(testId)) return NAVIGATOR_BATCH_TEST_ITEM;
-    if (isBoosterBatchTest(testId)) return BOOSTER_BATCH_TEST_ITEM;
-    const found = state.tests.find((candidate) => candidate.id === testId);
-    if (found) {
-      if (isNavigatorBatchTest(found.id, found.title)) return NAVIGATOR_BATCH_TEST_ITEM;
-      if (isBoosterBatchTest(found.id, found.title)) return BOOSTER_BATCH_TEST_ITEM;
-      return found;
-    }
-    return undefined;
-  });
+  const test = useAppStore((state) => state.tests.find((candidate) => candidate.id === testId));
   const [leaderboardError, setLeaderboardError] = useState<string>();
   const [isLeaderboardLoading, setIsLeaderboardLoading] = useState(false);
   const leaderboard = storedLeaderboard ?? EMPTY_LEADERBOARD;
@@ -79,7 +62,7 @@ export function TestResultScreen({ route, navigation }: RootStackScreenProps<'Te
   const [subjectBreakdown, setSubjectBreakdown] = useState<SubjectScoreItem[]>([]);
 
   useEffect(() => {
-    if (!test && testId && !isGrandTest(testId)) {
+    if (!test && testId) {
       void bootstrap(user).catch(() => undefined);
     }
   }, [bootstrap, test, testId, user]);

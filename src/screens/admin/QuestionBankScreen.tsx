@@ -366,6 +366,19 @@ export function QuestionBankScreen({ navigation, route }: RootStackScreenProps<'
     navigation.goBack();
   };
 
+  // Open Modal to Add an Extra Question
+  const handleOpenAddQuestion = () => {
+    setEditingQuestionIndex(-1);
+    setEditPrompt('');
+    setEditSubject(selectedSubjectTab !== 'ALL' ? selectedSubjectTab : 'Physics');
+    setEditSection('Section A (MCQ)');
+    setEditType('mcq');
+    setEditOptions(['', '', '', '']);
+    setEditCorrectAnswer('A');
+    setEditExplanation('');
+    setEditImageUrl(null);
+  };
+
   // Open Edit Modal for a Parsed Question
   const handleOpenEditQuestion = (question: ParsedDocxQuestion, index: number) => {
     setEditingQuestionIndex(index);
@@ -454,27 +467,44 @@ export function QuestionBankScreen({ navigation, route }: RootStackScreenProps<'
     }
 
     const updatedQuestions = [...parsedDocx.questions];
-    const targetQ = updatedQuestions[editingQuestionIndex];
-    if (!targetQ) return;
-
     let parsedInt: number | null = null;
     if (editType === 'integer') {
       const num = parseFloat(editCorrectAnswer);
       if (!isNaN(num)) parsedInt = num;
     }
 
-    updatedQuestions[editingQuestionIndex] = {
-      ...targetQ,
-      prompt: editPrompt.trim(),
-      subjectLabel: editSubject,
-      sectionLabel: editSection,
-      type: editType,
-      options: editType === 'mcq' ? editOptions.map((o) => o.trim()) : [],
-      correctAnswer: editCorrectAnswer.trim().toUpperCase(),
-      integerAnswer: parsedInt,
-      explanation: editExplanation.trim(),
-      imageUrl: editImageUrl,
-    };
+    if (editingQuestionIndex === -1) {
+      const nextQNum = (parsedDocx.questions[parsedDocx.questions.length - 1]?.questionNumber ?? 0) + 1;
+      const newQuestion: ParsedDocxQuestion = {
+        questionNumber: nextQNum,
+        prompt: editPrompt.trim(),
+        subjectLabel: editSubject,
+        sectionLabel: editSection,
+        type: editType,
+        options: editType === 'mcq' ? editOptions.map((o) => o.trim()) : [],
+        correctAnswer: editCorrectAnswer.trim().toUpperCase(),
+        integerAnswer: parsedInt,
+        explanation: editExplanation.trim(),
+        imageUrl: editImageUrl,
+      };
+      updatedQuestions.push(newQuestion);
+    } else {
+      const targetQ = updatedQuestions[editingQuestionIndex];
+      if (!targetQ) return;
+
+      updatedQuestions[editingQuestionIndex] = {
+        ...targetQ,
+        prompt: editPrompt.trim(),
+        subjectLabel: editSubject,
+        sectionLabel: editSection,
+        type: editType,
+        options: editType === 'mcq' ? editOptions.map((o) => o.trim()) : [],
+        correctAnswer: editCorrectAnswer.trim().toUpperCase(),
+        integerAnswer: parsedInt,
+        explanation: editExplanation.trim(),
+        imageUrl: editImageUrl,
+      };
+    }
 
     // Recompute subject counts
     const subjectCounts: Record<string, number> = {};
@@ -484,12 +514,14 @@ export function QuestionBankScreen({ navigation, route }: RootStackScreenProps<'
 
     setParsedDocx({
       ...parsedDocx,
+      totalQuestions: updatedQuestions.length,
       questions: updatedQuestions,
       subjectCounts,
     });
 
+    const isAdded = editingQuestionIndex === -1;
     setEditingQuestionIndex(null);
-    Alert.alert('Question Updated', `Question Q${targetQ.questionNumber} changes saved!`);
+    Alert.alert(isAdded ? 'Question Added' : 'Question Updated', isAdded ? 'Extra question added to set successfully!' : 'Changes saved!');
   };
 
   const filteredSets = useMemo(() => {
@@ -608,6 +640,11 @@ export function QuestionBankScreen({ navigation, route }: RootStackScreenProps<'
 
                     {/* Action Buttons: 1-Click Save & 1-Click Create Exam */}
                     <View style={styles.actionButtonsRow}>
+                      <AnimatedPressable style={styles.addQuestionDirectButton} onPress={handleOpenAddQuestion}>
+                        <PlusCircle size={16} color={colors.primary} />
+                        <Text style={styles.addQuestionDirectButtonText}>Add Question</Text>
+                      </AnimatedPressable>
+
                       <AnimatedPressable
                         style={[styles.saveSetButton, isSavingSet ? styles.buttonDisabled : null]}
                         onPress={() => void handleSaveParsedSet()}
@@ -870,9 +907,15 @@ export function QuestionBankScreen({ navigation, route }: RootStackScreenProps<'
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>
-                <Edit3 size={18} color={colors.primary} />
+                {editingQuestionIndex === -1 ? (
+                  <PlusCircle size={18} color={colors.primary} />
+                ) : (
+                  <Edit3 size={18} color={colors.primary} />
+                )}
                 <Text style={styles.modalTitle}>
-                  Edit Question {editingQuestionIndex !== null && parsedDocx ? parsedDocx.questions[editingQuestionIndex]?.questionNumber : ''}
+                  {editingQuestionIndex === -1
+                    ? 'Add Extra Question'
+                    : `Edit Question Q${editingQuestionIndex !== null && parsedDocx?.questions[editingQuestionIndex] ? parsedDocx.questions[editingQuestionIndex]?.questionNumber : ''}`}
                 </Text>
               </View>
               <AnimatedPressable style={styles.modalCloseButton} onPress={() => setEditingQuestionIndex(null)}>
@@ -1028,8 +1071,14 @@ export function QuestionBankScreen({ navigation, route }: RootStackScreenProps<'
                 <Text style={styles.modalCancelButtonText}>Cancel</Text>
               </AnimatedPressable>
               <AnimatedPressable style={styles.modalSaveButton} onPress={handleSaveQuestionEdit}>
-                <Check size={16} color={colors.white} />
-                <Text style={styles.modalSaveButtonText}>Save Changes</Text>
+                {editingQuestionIndex === -1 ? (
+                  <PlusCircle size={16} color={colors.white} />
+                ) : (
+                  <Check size={16} color={colors.white} />
+                )}
+                <Text style={styles.modalSaveButtonText}>
+                  {editingQuestionIndex === -1 ? 'Add Question' : 'Save Changes'}
+                </Text>
               </AnimatedPressable>
             </View>
           </View>
@@ -1152,6 +1201,24 @@ const styles = StyleSheet.create({
   actionButtonsRow: {
     flexDirection: 'row',
     gap: spacing.sm,
+    flexWrap: 'wrap',
+  },
+  addQuestionDirectButton: {
+    minHeight: 42,
+    borderRadius: radius.lg,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    backgroundColor: colors.white,
+    paddingHorizontal: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+  },
+  addQuestionDirectButtonText: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: '800',
   },
   saveSetButton: {
     flex: 1,
