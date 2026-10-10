@@ -1,5 +1,5 @@
 import React, { startTransition, useCallback, useMemo, useState } from 'react';
-import { Alert, FlatList, Modal, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, FlatList, Modal, Platform, StyleSheet, Text, TextInput, View } from 'react-native';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import DocumentPicker, { isCancel, pickSingle, types } from 'react-native-document-picker';
 import { useFocusEffect } from '@react-navigation/native';
@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppHeader } from '../../components/common/AppHeader';
 import { AnimatedPressable } from '../../components/common/AnimatedPressable';
+import { Button } from '../../components/common/Button';
 import { EmptyState } from '../../components/common/EmptyState';
 import { InputField } from '../../components/common/InputField';
 import { Screen } from '../../components/common/Screen';
@@ -133,6 +134,8 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
   const [reorderingTargetIndex, setReorderingTargetIndex] = useState<number | null>(null);
   const [targetPositionInput, setTargetPositionInput] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
+  const [validationFieldErrors, setValidationFieldErrors] = useState<{ title?: string; duration?: string; description?: string }>({});
 
   const resolvedDurationMinutes = coerceDurationMinutes(durationMinutes);
   const isMultiSubject = subjectMode === 'multi';
@@ -345,22 +348,27 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
   };
 
   const handleCreate = async () => {
-    if (!title.trim() || !description.trim()) {
-      Alert.alert('Missing details', 'Please add a title and description before publishing.');
-      return;
-    }
+    if (isCreating) return;
 
+    const fieldErrors: { title?: string; duration?: string; description?: string } = {};
+    if (!title.trim()) {
+      fieldErrors.title = 'Test title is required';
+    }
+    if (!description.trim()) {
+      fieldErrors.description = 'Test description is required';
+    }
     if (!durationMinutes.trim()) {
-      Alert.alert('Duration required', 'Please enter the paper duration in minutes.');
-      return;
+      fieldErrors.duration = 'Duration is required';
+    } else if (resolvedDurationMinutes < 5 || resolvedDurationMinutes > 600) {
+      fieldErrors.duration = 'Enter a duration between 5 and 600 minutes';
     }
 
-    if (resolvedDurationMinutes < 5 || resolvedDurationMinutes > 600) {
-      Alert.alert('Invalid duration', 'Enter a duration between 5 and 600 minutes.');
+    if (Object.keys(fieldErrors).length > 0) {
+      setValidationFieldErrors(fieldErrors);
+      Alert.alert('Missing Details', 'Please complete the highlighted required fields.');
       return;
     }
-
-    // Weekly tests without a batch are automatically Open for All. No error is thrown.
+    setValidationFieldErrors({});
 
     if (type === 'scholarship' && (!scholarshipAdmissionClass || !scholarshipTargetExam)) {
       Alert.alert('Scholarship audience required', 'Choose the admission class and target exam for this scholarship paper.');
@@ -397,6 +405,12 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
           opts.push(`(${String.fromCharCode(65 + opts.length)})`);
         }
 
+        if (question.needsReview) {
+          validationErrors.push(`Question ${qNum}: Correct answer is marked as Needs Review. Please confirm the answer key.`);
+        } else if (question.correctOptionIndex === undefined || question.correctOptionIndex < 0 || question.correctOptionIndex > 3) {
+          validationErrors.push(`Question ${qNum}: Correct answer is unresolved. Please select Option A, B, C, or D.`);
+        }
+
         const correctIdx = Math.max(0, Math.min(question.correctOptionIndex ?? 0, opts.length - 1));
 
         return {
@@ -410,7 +424,8 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
         };
       } else {
         let intAns = question.integerAnswer;
-        if (typeof intAns !== 'number' || Number.isNaN(intAns)) {
+        if (question.needsReview || typeof intAns !== 'number' || Number.isNaN(intAns)) {
+          validationErrors.push(`Question ${qNum}: Numeric answer is missing or invalid.`);
           intAns = 0;
         }
 
@@ -447,6 +462,7 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
     const resolvedBatchId = isTestOpenForAll ? undefined : (batchId || undefined);
 
     try {
+      setIsCreating(true);
       const scheduledAt = combineScheduleInputs(scheduleDate, scheduleTime);
       await createTest({
         title: title.trim(),
@@ -462,12 +478,14 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
         questions: normalizedQuestions,
       });
 
-      Alert.alert('Test created', 'The new paper is now available in the tests feed.');
+      Alert.alert('Test Created Successfully', 'The new paper is now available in the tests feed.');
       await clearExamCreationDraft();
       navigation.goBack();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to publish the test right now.';
-      Alert.alert('Publish failed', message);
+      Alert.alert('Creation Failed', message);
+    } finally {
+      setIsCreating(false);
     }
   };
 
@@ -796,12 +814,31 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
               <AppHeader title="Create Test" subtitle="Weekly and scholarship setup stays the same. Questions now come from your bank or manual entries." />
 
               <View style={styles.formCard}>
-                <InputField label="Title" placeholder="Weekly Mock Test - Physics" value={title} onChangeText={setTitle} />
+                <InputField
+                  label="Title"
+                  placeholder="Weekly Mock Test - Physics"
+                  value={title}
+                  onChangeText={(val) => {
+                    setTitle(val);
+                    if (validationFieldErrors.title) {
+                      setValidationFieldErrors((prev) => ({ ...prev, title: undefined }));
+                    }
+                  }}
+                  error={validationFieldErrors.title}
+                  required
+                />
                 <InputField
                   label="Description"
                   placeholder="What should learners expect in this test?"
                   value={description}
-                  onChangeText={setDescription}
+                  onChangeText={(val) => {
+                    setDescription(val);
+                    if (validationFieldErrors.description) {
+                      setValidationFieldErrors((prev) => ({ ...prev, description: undefined }));
+                    }
+                  }}
+                  error={validationFieldErrors.description}
+                  required
                 />
                 <Text style={styles.sectionTitle}>Subject Setup</Text>
                 <Text style={styles.fileHint}>Choose one subject for the whole paper, or use sections for combined papers. This mapping powers insights.</Text>
@@ -843,7 +880,14 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
                       placeholder="60"
                       keyboardType="number-pad"
                       value={durationMinutes}
-                      onChangeText={(value) => setDurationMinutes(sanitizeDurationInput(value))}
+                      onChangeText={(value) => {
+                        setDurationMinutes(sanitizeDurationInput(value));
+                        if (validationFieldErrors.duration) {
+                          setValidationFieldErrors((prev) => ({ ...prev, duration: undefined }));
+                        }
+                      }}
+                      error={validationFieldErrors.duration}
+                      required
                       rightAccessory={<Text style={styles.inputAccessory}>min</Text>}
                     />
                   </View>
@@ -865,19 +909,83 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
                 <View style={styles.row}>
                   <View style={styles.flexItem}>
                     <Text style={styles.sectionLabel}>Start Date</Text>
-                    <AnimatedPressable style={styles.pickerField} onPress={() => setIsDatePickerVisible(true)}>
-                      <Text style={styles.pickerValue}>{formatDateLabel(combineScheduleInputs(scheduleDate, scheduleTime))}</Text>
-                    </AnimatedPressable>
+                    {Platform.OS === 'web' ? (
+                      <View style={styles.pickerField}>
+                        {React.createElement('input', {
+                          type: 'date',
+                          value: scheduleDate,
+                          onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+                            if (e?.target?.value) {
+                              setScheduleDate(e.target.value);
+                            }
+                          },
+                          onClick: (e: React.MouseEvent<HTMLInputElement>) => {
+                            try {
+                              (e.target as HTMLInputElement).showPicker?.();
+                            } catch {}
+                          },
+                          style: {
+                            width: '100%',
+                            height: '100%',
+                            minHeight: 44,
+                            border: 'none',
+                            outline: 'none',
+                            background: 'transparent',
+                            color: colors.text,
+                            fontSize: 14,
+                            fontWeight: '600',
+                            fontFamily: 'inherit',
+                            cursor: 'pointer',
+                          },
+                        })}
+                      </View>
+                    ) : (
+                      <AnimatedPressable style={styles.pickerField} onPress={() => setIsDatePickerVisible(true)}>
+                        <Text style={styles.pickerValue}>{formatDateLabel(combineScheduleInputs(scheduleDate, scheduleTime))}</Text>
+                      </AnimatedPressable>
+                    )}
                   </View>
                   <View style={styles.flexItem}>
                     <Text style={styles.sectionLabel}>Start Time</Text>
-                    <AnimatedPressable style={styles.pickerField} onPress={() => setIsTimePickerVisible(true)}>
-                      <Text style={styles.pickerValue}>{scheduleTime}</Text>
-                    </AnimatedPressable>
+                    {Platform.OS === 'web' ? (
+                      <View style={styles.pickerField}>
+                        {React.createElement('input', {
+                          type: 'time',
+                          value: scheduleTime,
+                          onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+                            if (e?.target?.value) {
+                              setScheduleTime(e.target.value);
+                            }
+                          },
+                          onClick: (e: React.MouseEvent<HTMLInputElement>) => {
+                            try {
+                              (e.target as HTMLInputElement).showPicker?.();
+                            } catch {}
+                          },
+                          style: {
+                            width: '100%',
+                            height: '100%',
+                            minHeight: 44,
+                            border: 'none',
+                            outline: 'none',
+                            background: 'transparent',
+                            color: colors.text,
+                            fontSize: 14,
+                            fontWeight: '600',
+                            fontFamily: 'inherit',
+                            cursor: 'pointer',
+                          },
+                        })}
+                      </View>
+                    ) : (
+                      <AnimatedPressable style={styles.pickerField} onPress={() => setIsTimePickerVisible(true)}>
+                        <Text style={styles.pickerValue}>{scheduleTime}</Text>
+                      </AnimatedPressable>
+                    )}
                   </View>
                 </View>
 
-                {isDatePickerVisible ? (
+                {Platform.OS !== 'web' && isDatePickerVisible ? (
                   <DateTimePicker
                     mode="date"
                     value={buildSchedulePickerDate(scheduleDate, scheduleTime)}
@@ -885,7 +993,7 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
                   />
                 ) : null}
 
-                {isTimePickerVisible ? (
+                {Platform.OS !== 'web' && isTimePickerVisible ? (
                   <DateTimePicker
                     mode="time"
                     value={buildSchedulePickerDate(scheduleDate, scheduleTime)}
@@ -1131,9 +1239,14 @@ export function CreateTestScreen({ navigation }: RootStackScreenProps<'CreateTes
             styles.stickyPublishBar,
             { paddingBottom: Math.max(insets.bottom, spacing.sm) },
           ]}>
-          <AnimatedPressable style={styles.primaryButton} onPress={handleCreate}>
-            <Text style={styles.primaryButtonText}>Publish Test</Text>
-          </AnimatedPressable>
+          <Button
+            label="Publish Test"
+            loadingLabel="Publishing Test..."
+            loading={isCreating}
+            onPress={handleCreate}
+            size="lg"
+            fullWidth
+          />
         </View>
       </View>
     </Screen>

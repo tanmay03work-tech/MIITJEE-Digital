@@ -154,8 +154,8 @@ export function TestsScreen() {
             </Text>
           </View>
           <View style={styles.scorePill}>
-            <Text style={styles.scorePillText}>{user?.averageScore ?? 0}%</Text>
-            <Text style={styles.scorePillLabel}>Average</Text>
+            <Text style={styles.scorePillText}>{user?.averageScore ?? 0} pts</Text>
+            <Text style={styles.scorePillLabel}>Avg Marks</Text>
           </View>
         </LinearGradient>
 

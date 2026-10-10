@@ -52,6 +52,7 @@ import { useAuthStore } from '../../store/authStore';
 import { colors, radius, spacing } from '../../theme';
 import { CreateTestQuestionPayload, QuestionBankQuestion, QuestionBankSet, QuestionType } from '../../types';
 import { DocxParseResult, ParsedDocxQuestion, parseDocxQuestionPaper } from '../../services/word/docxQuestionParser';
+import { resolveCanonicalAnswer } from '../../utils/questionCanonicalNormalization';
 import { uploadExamAsset } from '../../services/api/storage';
 import { formatExamTextForDisplay } from '../../utils/examText';
 
@@ -217,19 +218,8 @@ export function QuestionBankScreen({ navigation, route }: RootStackScreenProps<'
         prompt = 'Refer to the question diagram below.';
       }
 
-      let correctIdx = 0;
       let opts = (q.options || []).map((opt) => opt.trim());
       if (q.type === 'mcq') {
-        const upper = (q.correctAnswer || '').toUpperCase().trim();
-        if (upper === 'A' || upper === '1') correctIdx = 0;
-        else if (upper === 'B' || upper === '2') correctIdx = 1;
-        else if (upper === 'C' || upper === '3') correctIdx = 2;
-        else if (upper === 'D' || upper === '4') correctIdx = 3;
-        else {
-          const matchIdx = opts.findIndex((opt) => opt.toLowerCase() === (q.correctAnswer || '').toLowerCase());
-          if (matchIdx !== -1) correctIdx = matchIdx;
-        }
-
         if (opts.length === 0 || opts.every((opt) => !opt)) {
           opts = ['(A)', '(B)', '(C)', '(D)'];
         } else {
@@ -242,23 +232,18 @@ export function QuestionBankScreen({ navigation, route }: RootStackScreenProps<'
         opts = ['', '', '', ''];
       }
 
-      let intAns: number | undefined = undefined;
-      if (q.type === 'integer') {
-        const parsed = typeof q.integerAnswer === 'number' && !Number.isNaN(q.integerAnswer)
-          ? q.integerAnswer
-          : parseFloat(String(q.correctAnswer || '0'));
-        intAns = Number.isNaN(parsed) ? 0 : parsed;
-      }
+      const resolution = resolveCanonicalAnswer(q.type, q.correctAnswer ?? q.integerAnswer, opts);
 
       return {
         type: q.type,
         prompt,
         options: opts,
-        correctOptionIndex: correctIdx,
-        integerAnswer: intAns,
+        correctOptionIndex: resolution.correctOptionIndex >= 0 ? resolution.correctOptionIndex : 0,
+        integerAnswer: resolution.integerAnswer,
         explanation: q.explanation || '',
         imageUrl: q.imageUrl || null,
         subjectLabel: q.subjectLabel || 'Physics',
+        needsReview: q.needsReview || resolution.needsReview,
       };
     });
 
@@ -275,26 +260,15 @@ export function QuestionBankScreen({ navigation, route }: RootStackScreenProps<'
         return;
       }
 
-      const sortedRows = [...(rows || [])].sort((a, b) => Number(a.id) - Number(b.id));
-      const draftQuestions: CreateTestQuestionPayload[] = sortedRows.map((q) => {
+      // Do not sort by ID; preserve question order from set
+      const draftQuestions: CreateTestQuestionPayload[] = (rows || []).map((q) => {
         let prompt = (q.question || '').trim();
         if (!prompt && q.imageUrl) {
           prompt = 'Refer to the question diagram below.';
         }
 
-        let correctIdx = 0;
         let opts = (q.options || []).map((opt) => opt.trim());
         if (q.type === 'mcq') {
-          const upper = (q.correctAnswer || '').toUpperCase().trim();
-          if (upper === 'A' || upper === '1') correctIdx = 0;
-          else if (upper === 'B' || upper === '2') correctIdx = 1;
-          else if (upper === 'C' || upper === '3') correctIdx = 2;
-          else if (upper === 'D' || upper === '4') correctIdx = 3;
-          else {
-            const matchIdx = opts.findIndex((opt) => opt.toLowerCase() === (q.correctAnswer || '').toLowerCase());
-            if (matchIdx !== -1) correctIdx = matchIdx;
-          }
-
           if (opts.length === 0 || opts.every((opt) => !opt)) {
             opts = ['(A)', '(B)', '(C)', '(D)'];
           } else {
@@ -307,21 +281,18 @@ export function QuestionBankScreen({ navigation, route }: RootStackScreenProps<'
           opts = ['', '', '', ''];
         }
 
-        let intAns: number | undefined = undefined;
-        if (q.type === 'integer') {
-          const parsed = parseFloat(q.correctAnswer || '0');
-          intAns = Number.isNaN(parsed) ? 0 : parsed;
-        }
+        const resolution = resolveCanonicalAnswer(q.type, q.correctAnswer, opts);
 
         return {
           type: q.type,
           prompt,
           options: opts,
-          correctOptionIndex: correctIdx,
-          integerAnswer: intAns,
+          correctOptionIndex: resolution.correctOptionIndex >= 0 ? resolution.correctOptionIndex : 0,
+          integerAnswer: resolution.integerAnswer,
           explanation: '',
           imageUrl: q.imageUrl || null,
           subjectLabel: 'Physics',
+          needsReview: resolution.needsReview,
         };
       });
 
@@ -654,7 +625,7 @@ export function QuestionBankScreen({ navigation, route }: RootStackScreenProps<'
                         ) : (
                           <FolderOpen size={16} color={colors.primary} />
                         )}
-                        <Text style={styles.saveSetButtonText}>Save to Bank</Text>
+                        <Text style={styles.saveSetButtonText}>{isSavingSet ? 'Saving Set...' : 'Save to Bank'}</Text>
                       </AnimatedPressable>
 
                       <AnimatedPressable style={styles.createExamDirectButton} onPress={handleCreateExamFromDocx}>

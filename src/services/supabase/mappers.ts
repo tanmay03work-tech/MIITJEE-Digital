@@ -8,7 +8,6 @@ import {
   EnquiryRecord,
   EnrollmentQueryRecord,
   LeaderboardEntry,
-  PdfImportResponse,
   QuestionAnalytics,
   ScholarshipRegistrationRecord,
   StudentAnalytics,
@@ -294,6 +293,7 @@ export function mapReviewRow(row: ReviewRow): TestAttemptReviewItem {
     isUnattempted,
     explanation: row.explanation,
     imageUrl: normalizeAssetUrl(row.image_url),
+    subject: row.subject ?? null,
   };
 }
 
@@ -435,24 +435,6 @@ export function mapScholarshipRegistration(row: ScholarshipRegistrationRow): Sch
   };
 }
 
-export function mapPdfImportQuestion(question: PdfImportResponse['questions'][number]) {
-  const normalizedQuestion = normalizeExamText(question.question);
-  const normalizedOptions = question.type === 'mcq' ? question.options.map((option) => normalizeExamText(option)) : ['', '', '', ''];
-  const normalizedCorrectAnswer = normalizeExamText(question.correctAnswer);
-
-  return {
-    type: question.type,
-    prompt: normalizedQuestion,
-    options: normalizedOptions,
-    correctOptionIndex:
-      question.type === 'mcq'
-        ? Math.max(0, normalizedOptions.findIndex((option) => option === normalizedCorrectAnswer))
-        : 0,
-    integerAnswer: question.integerAnswer,
-    explanation: normalizeExamText(question.explanation),
-    imageUrl: question.image,
-  };
-}
 
 export function mapActivityLog(row: ActivityLogRow): ActivityLogEntry {
   return {

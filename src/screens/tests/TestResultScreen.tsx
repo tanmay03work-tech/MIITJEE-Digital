@@ -93,19 +93,16 @@ export function TestResultScreen({ route, navigation }: RootStackScreenProps<'Te
         const breakdownMap: Record<string, { correct: number; wrong: number; unattempted: number; score: number; total: number }> = {};
         const defaultSubject = (test?.subject || 'Physics').trim();
 
-        reviews.forEach((item, index) => {
-          let sub = questionSubjectMap[item.questionId];
-          if (!sub) {
-            const lowerDef = defaultSubject.toLowerCase();
-            if (lowerDef.includes('bio') || lowerDef.includes('pcb') || reviews.length === 180) {
-              if (index < 45) sub = 'Physics';
-              else if (index < 90) sub = 'Chemistry';
-              else sub = 'Biology';
-            } else if (lowerDef.includes('physics') && lowerDef.includes('chem')) {
-              const third = Math.ceil(reviews.length / 3);
-              if (index < third) sub = 'Physics';
-              else if (index < third * 2) sub = 'Chemistry';
-              else sub = 'Mathematics';
+        reviews.forEach((item) => {
+          let sub = (item.subject && item.subject.trim()) || questionSubjectMap[item.questionId];
+          if (sub) {
+            const normalized = sub.charAt(0).toUpperCase() + sub.slice(1).toLowerCase();
+            sub = normalized === 'Maths' ? 'Mathematics' : normalized;
+          } else {
+            const promptMatch = item.prompt?.match(/^(?:\[|\b)(Physics|Chemistry|Mathematics|Maths|Biology|Botany|Zoology)(?:\]|\b|:|-)/i);
+            if (promptMatch && promptMatch[1]) {
+              const matched = promptMatch[1].charAt(0).toUpperCase() + promptMatch[1].slice(1).toLowerCase();
+              sub = matched === 'Maths' ? 'Mathematics' : matched;
             } else {
               sub = defaultSubject;
             }

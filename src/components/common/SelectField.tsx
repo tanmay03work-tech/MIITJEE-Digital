@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
-import { ChevronDown } from 'lucide-react-native';
+import { Modal, Platform, Pressable, ScrollView, StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { AlertCircle, Check, ChevronDown, X } from 'lucide-react-native';
 
 import { colors, radius, spacing } from '../../theme';
 
@@ -18,6 +18,8 @@ interface SelectFieldProps {
   onValueChange: (value: string) => void;
   disabled?: boolean;
   menuTitle?: string;
+  error?: string;
+  required?: boolean;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -29,6 +31,8 @@ export function SelectField({
   onValueChange,
   disabled = false,
   menuTitle,
+  error,
+  required = false,
   style,
 }: SelectFieldProps) {
   const [visible, setVisible] = useState(false);
@@ -40,22 +44,46 @@ export function SelectField({
 
   return (
     <View style={[styles.wrapper, style]}>
-      {label ? <Text style={styles.label}>{label}</Text> : null}
+      {label ? (
+        <View style={styles.labelRow}>
+          <Text style={[styles.label, error ? styles.labelError : null]}>{label}</Text>
+          {required ? <Text style={styles.requiredStar}>*</Text> : null}
+        </View>
+      ) : null}
       <Pressable
         disabled={disabled}
-        style={[styles.field, disabled && styles.fieldDisabled]}
+        accessibilityRole="combobox"
+        style={[
+          styles.field,
+          error ? styles.fieldError : null,
+          disabled && styles.fieldDisabled,
+        ]}
         onPress={() => setVisible(true)}>
         <Text style={[styles.value, !selectedOption && styles.placeholder]}>
           {selectedOption?.label ?? placeholder}
         </Text>
-        <ChevronDown size={18} color={colors.textMuted} />
+        <ChevronDown size={18} color={error ? colors.danger : colors.textMuted} />
       </Pressable>
+      {error ? (
+        <View style={styles.errorRow}>
+          <AlertCircle size={14} color={colors.danger} />
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      ) : null}
 
       <Modal visible={visible} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setVisible(false)}>
         <View style={styles.overlay}>
           <Pressable style={styles.backdrop} onPress={() => setVisible(false)} />
           <View style={styles.sheet}>
-            <Text style={styles.sheetTitle}>{menuTitle ?? label ?? 'Select an option'}</Text>
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle}>{menuTitle ?? label ?? 'Select an option'}</Text>
+              <Pressable
+                onPress={() => setVisible(false)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                style={styles.closeBtn}>
+                <X size={18} color={colors.textMuted} />
+              </Pressable>
+            </View>
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.optionList}>
               {options.map((option) => {
                 const selected = option.value === value;
@@ -72,6 +100,7 @@ export function SelectField({
                       <Text style={[styles.optionTitle, selected && styles.optionTitleSelected]}>{option.label}</Text>
                       {option.description ? <Text style={styles.optionDescription}>{option.description}</Text> : null}
                     </View>
+                    {selected ? <Check size={18} color={colors.primary} /> : null}
                   </Pressable>
                 );
               })}
@@ -85,7 +114,12 @@ export function SelectField({
 
 const styles = StyleSheet.create({
   wrapper: {
-    gap: spacing.sm,
+    gap: spacing.xs,
+  },
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   label: {
     color: colors.textMuted,
@@ -94,17 +128,29 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
+  labelError: {
+    color: colors.danger,
+  },
+  requiredStar: {
+    color: colors.danger,
+    fontSize: 12,
+    fontWeight: '700',
+  },
   field: {
-    minHeight: 52,
+    minHeight: 48,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.surfaceRaised,
+    backgroundColor: colors.surface,
     paddingHorizontal: spacing.lg,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.md,
+  },
+  fieldError: {
+    borderColor: colors.danger,
+    backgroundColor: '#FFF5F5',
   },
   fieldDisabled: {
     opacity: 0.6,
@@ -112,59 +158,90 @@ const styles = StyleSheet.create({
   value: {
     color: colors.text,
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '600',
     flex: 1,
   },
   placeholder: {
     color: colors.textSubtle,
-    fontWeight: '500',
+    fontWeight: '400',
+  },
+  errorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 2,
+  },
+  errorText: {
+    color: colors.danger,
+    fontSize: 12,
+    fontWeight: '600',
   },
   overlay: {
     flex: 1,
-    justifyContent: 'flex-end',
+    justifyContent: Platform.OS === 'web' ? 'center' : 'flex-end',
+    alignItems: Platform.OS === 'web' ? 'center' : 'stretch',
+    padding: Platform.OS === 'web' ? spacing.xl : 0,
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(12,18,30,0.32)',
+    backgroundColor: colors.overlay,
   },
   sheet: {
-    backgroundColor: colors.surfaceRaised,
+    backgroundColor: colors.surface,
     borderTopLeftRadius: radius.xl,
     borderTopRightRadius: radius.xl,
+    borderBottomLeftRadius: Platform.OS === 'web' ? radius.xl : 0,
+    borderBottomRightRadius: Platform.OS === 'web' ? radius.xl : 0,
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.xl,
     paddingBottom: spacing.xxl,
     borderWidth: 1,
     borderColor: colors.border,
+    width: Platform.OS === 'web' ? '100%' : 'auto',
+    maxWidth: Platform.OS === 'web' ? 480 : undefined,
+    maxHeight: '80%',
+  },
+  sheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.lg,
   },
   sheetTitle: {
     color: colors.text,
     fontSize: 18,
     fontWeight: '800',
-    marginBottom: spacing.lg,
+  },
+  closeBtn: {
+    padding: 4,
+    borderRadius: radius.pill,
   },
   optionList: {
     gap: spacing.sm,
   },
   option: {
-    borderRadius: radius.lg,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.lg,
+    paddingVertical: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   optionSelected: {
     borderColor: colors.primary,
     backgroundColor: colors.primarySoft,
   },
   optionTextWrap: {
-    gap: spacing.xs,
+    gap: 2,
+    flex: 1,
   },
   optionTitle: {
     color: colors.text,
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   optionTitleSelected: {
     color: colors.primary,

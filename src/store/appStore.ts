@@ -25,6 +25,7 @@ import {
   fetchQuestionSets,
   fetchQuestionSetQuestions,
   createQuestionSet,
+  reorderQuestionSet,
   deleteQuestionSet,
   fetchActivityLogs,
   invalidateAdminCache,
@@ -36,7 +37,6 @@ import {
   fetchQuestions,
   fetchStudentInsights,
   fetchTests,
-  importQuestionsFromPdf,
   registerScholarshipAttempt,
   submitGeneralEnquiry,
   submitAttempt,
@@ -61,8 +61,6 @@ import {
   EnrollmentQueryPayload,
   LeaderboardEntry,
   LeaderboardScope,
-  PdfImportPayload,
-  PdfImportResponse,
   QuestionBankQuestion,
   QuestionBankSet,
   ScholarshipRegistrationPayload,
@@ -85,6 +83,7 @@ import {
   deleteReattemptRequest,
 } from '../services/api/reattemptRequests';
 import { normalizeExamText } from '../utils/examText';
+import { resolveCanonicalAnswer } from '../utils/questionCanonicalNormalization';
 import { logError } from '../utils/logger';
 
 interface AppState {
@@ -128,6 +127,7 @@ interface AppState {
   loadQuestionBankSets: (force?: boolean) => Promise<QuestionBankSet[]>;
   loadQuestionSetQuestions: (setId: number) => Promise<QuestionBankQuestion[]>;
   createQuestionSet: (payload: { pdfName: string; questions: Array<{ question: string; options: string[]; correct_answer: string; type: 'mcq' | 'integer'; explanation?: string; image_url?: string | null }> }) => Promise<{ set_id: number; question_count: number }>;
+  reorderQuestionSet: (setId: number, questionIds: number[]) => Promise<void>;
   deleteQuestionSet: (setId: number) => Promise<void>;
   toggleQuestionBankSelection: (question: QuestionBankQuestion) => void;
   selectAllQuestionBankQuestions: (questions: QuestionBankQuestion[]) => void;
@@ -136,9 +136,6 @@ interface AppState {
   queueSelectedQuestionBankQuestions: () => CreateTestPayload['questions'];
   queueDraftQuestions: (questions: CreateTestPayload['questions']) => void;
   consumePendingQuestionBankImport: () => CreateTestPayload['questions'];
-  importQuestionsFromPdf: (payload: PdfImportPayload) => Promise<
-    PdfImportResponse & { draftQuestions: CreateTestPayload['questions'] }
-  >;
   submitAttempt: (payload: SubmitAttemptPayload) => Promise<SubmittedTestResponse>;
   submitEnrollmentQuery: (payload: EnrollmentQueryPayload) => Promise<void>;
   registerScholarshipAttempt: (payload: ScholarshipRegistrationPayload) => Promise<void>;
@@ -170,8 +167,8 @@ const ADMIN_DATA_CACHE_TTL_MS = 60_000;
 
 function getLeaderboardCacheKey(payload?: { scope?: LeaderboardScope; batchId?: string | null; testId?: string }) {
   const scope = payload?.scope ?? 'overall_history';
-  const batchId = payload?.batchId ?? 'self';
-  const testId = payload?.testId ?? 'all';
+  const batchId = payload?.batchId && payload.batchId.trim() ? payload.batchId.trim().toUpperCase() : 'ALL';
+  const testId = payload?.testId && payload.testId.trim() ? payload.testId.trim() : 'ALL';
   return `${scope}:${batchId}:${testId}`;
 }
 
@@ -238,34 +235,18 @@ function mapQuestionBankQuestionToDraft(question: QuestionBankQuestion): CreateT
     }
   }
 
-  let correctOptionIndex = 0;
-  if (question.type === 'mcq') {
-    const ans = (question.correctAnswer || '').trim().toUpperCase();
-    if (ans === 'A' || ans === '1') correctOptionIndex = 0;
-    else if (ans === 'B' || ans === '2') correctOptionIndex = 1;
-    else if (ans === 'C' || ans === '3') correctOptionIndex = 2;
-    else if (ans === 'D' || ans === '4') correctOptionIndex = 3;
-    else {
-      const foundIdx = normalizedOptions.findIndex((opt) => opt.trim().toLowerCase() === ans.toLowerCase());
-      if (foundIdx !== -1) correctOptionIndex = foundIdx;
-    }
-  }
-
-  let integerAnswer: number | undefined = undefined;
-  if (question.type === 'integer') {
-    const parsed = parseFloat(question.correctAnswer || '0');
-    integerAnswer = Number.isNaN(parsed) ? 0 : parsed;
-  }
+  const resolution = resolveCanonicalAnswer(question.type, question.correctAnswer, normalizedOptions);
 
   return {
     type: question.type,
     prompt: normalizedPrompt,
     options: normalizedOptions,
-    correctOptionIndex,
-    integerAnswer,
-    explanation: '',
+    correctOptionIndex: resolution.correctOptionIndex,
+    integerAnswer: resolution.integerAnswer,
+    explanation: question.explanation || '',
     imageUrl: question.imageUrl ?? null,
-    subjectLabel: '',
+    subjectLabel: (question as any).subjectLabel || '',
+    needsReview: resolution.needsReview,
   };
 }
 
@@ -403,6 +384,7 @@ export const useAppStore = create<AppState>((set, get) => ({
                 fetchLeaderboard(
                   {
                     scope: 'overall_history',
+                    batchId: null,
                   },
                   refreshedCurrentUser?.id ?? currentUser?.id,
                 ),
@@ -415,10 +397,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           leaderboard,
           leaderboardFetchedAt: Date.now(),
           leaderboardByScope: {
-            [getLeaderboardCacheKey({ scope: 'overall_history', batchId: shouldPrefetchLeaderboard ? refreshedCurrentUser?.batchId ?? null : undefined })]: leaderboard,
+            [getLeaderboardCacheKey({ scope: 'overall_history', batchId: null })]: leaderboard,
           },
           leaderboardFetchedAtByScope: {
-            [getLeaderboardCacheKey({ scope: 'overall_history', batchId: shouldPrefetchLeaderboard ? refreshedCurrentUser?.batchId ?? null : undefined })]: Date.now(),
+            [getLeaderboardCacheKey({ scope: 'overall_history', batchId: null })]: Date.now(),
           },
         });
       });
@@ -522,17 +504,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     const cacheKey = getLeaderboardCacheKey(payload);
 
     if (scope === 'test_wise' && testId) {
-      const cachedLeaderboard = get().testLeaderboards[testId];
-      const cachedAt = get().testLeaderboardFetchedAt[testId];
+      const cachedLeaderboard = get().testLeaderboards[cacheKey] ?? get().testLeaderboards[testId];
+      const cachedAt = get().testLeaderboardFetchedAt[cacheKey] ?? get().testLeaderboardFetchedAt[testId];
       if (cachedLeaderboard && cachedAt && now - cachedAt < LEADERBOARD_CACHE_TTL_MS) {
         return cachedLeaderboard;
       }
     }
 
     if (scope === 'overall_history') {
-      const cachedLeaderboard = get().leaderboardByScope[cacheKey] ?? get().leaderboard;
-      const cachedAt = get().leaderboardFetchedAtByScope[cacheKey] ?? get().leaderboardFetchedAt;
-      if (cachedLeaderboard.length > 0 && cachedAt && now - cachedAt < LEADERBOARD_CACHE_TTL_MS) {
+      const cachedLeaderboard = get().leaderboardByScope[cacheKey];
+      const cachedAt = get().leaderboardFetchedAtByScope[cacheKey];
+      if (cachedLeaderboard && cachedLeaderboard.length > 0 && cachedAt && now - cachedAt < LEADERBOARD_CACHE_TTL_MS) {
         return cachedLeaderboard;
       }
     }
@@ -551,10 +533,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       set((state) => ({
         testLeaderboards: {
           ...state.testLeaderboards,
+          [cacheKey]: leaderboard,
           [testId]: leaderboard,
         },
         testLeaderboardFetchedAt: {
           ...state.testLeaderboardFetchedAt,
+          [cacheKey]: now,
           [testId]: now,
         },
       }));
@@ -562,8 +546,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     set((state) => ({
-      leaderboard: leaderboard,
-      leaderboardFetchedAt: now,
+      leaderboard: !payload?.batchId ? leaderboard : state.leaderboard,
+      leaderboardFetchedAt: !payload?.batchId ? now : state.leaderboardFetchedAt,
       leaderboardByScope: {
         ...state.leaderboardByScope,
         [cacheKey]: leaderboard,
@@ -668,6 +652,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       questionBankSelection: state.questionBankSelection.filter((entry) => entry.setId !== setId),
     }));
   },
+  reorderQuestionSet: async (setId, questionIds) => {
+    await reorderQuestionSet(setId, questionIds);
+    set((state) => ({
+      questionBankSets: state.questionBankSets.map((s) =>
+        s.setId === setId ? { ...s } : s
+      ),
+    }));
+  },
   toggleQuestionBankSelection: (question) =>
     set((state) => {
       const exists = state.questionBankSelection.some((entry) => entry.id === question.id);
@@ -694,8 +686,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     }),
   clearQuestionBankSelection: () => set({ questionBankSelection: [] }),
   queueSelectedQuestionBankQuestions: () => {
-    const sorted = [...get().questionBankSelection].sort((a, b) => Number(a.id) - Number(b.id));
-    const queued = sorted.map(mapQuestionBankQuestionToDraft);
+    const selected = [...get().questionBankSelection].sort((a, b) => {
+      const posA = typeof a.position === 'number' && a.position > 0 ? a.position : Number(a.id);
+      const posB = typeof b.position === 'number' && b.position > 0 ? b.position : Number(b.id);
+      if (posA !== posB) return posA - posB;
+      return Number(a.id) - Number(b.id);
+    });
+    const queued = selected.map(mapQuestionBankQuestionToDraft);
     set({
       pendingQuestionBankImport: queued,
       questionBankSelection: [],
@@ -710,7 +707,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ pendingQuestionBankImport: [] });
     return queued;
   },
-  importQuestionsFromPdf: async (payload) => importQuestionsFromPdf({ ...payload, provider: 'gemini' }),
   submitAttempt: async (payload) => {
     set({ isSubmitting: true, error: undefined });
 

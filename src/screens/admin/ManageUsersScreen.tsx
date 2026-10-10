@@ -34,6 +34,7 @@ interface StudentAccessCardProps {
 interface AdminApprovalCardProps {
   user: AppUser;
   onApprove: (user: AppUser) => Promise<void>;
+  isApproving?: boolean;
 }
 
 const StudentAccessCard = memo(function StudentAccessCard({ user, onAssignBatch, batchOptions }: StudentAccessCardProps) {
@@ -68,7 +69,7 @@ const StudentAccessCard = memo(function StudentAccessCard({ user, onAssignBatch,
   );
 });
 
-const AdminApprovalCard = memo(function AdminApprovalCard({ user, onApprove }: AdminApprovalCardProps) {
+const AdminApprovalCard = memo(function AdminApprovalCard({ user, onApprove, isApproving }: AdminApprovalCardProps) {
   return (
     <Card style={styles.userCard}>
       <View style={styles.cardHeader}>
@@ -77,8 +78,11 @@ const AdminApprovalCard = memo(function AdminApprovalCard({ user, onApprove }: A
           <Text style={styles.userEmail}>{user.email}</Text>
         </View>
         {user.approvalStatus === 'pending' ? (
-          <AnimatedPressable style={styles.approveButton} onPress={() => void onApprove(user)}>
-            <Text style={styles.approveButtonText}>Approve Admin</Text>
+          <AnimatedPressable
+            style={[styles.approveButton, isApproving && { opacity: 0.6 }]}
+            disabled={isApproving}
+            onPress={() => void onApprove(user)}>
+            <Text style={styles.approveButtonText}>{isApproving ? 'Approving...' : 'Approve Admin'}</Text>
           </AnimatedPressable>
         ) : (
           <Badge label="approved" tone="success" />
@@ -249,17 +253,23 @@ export function ManageUsersScreen() {
     [assignBatch, batches],
   );
 
+  const [approvingUserId, setApprovingUserId] = useState<string | null>(null);
+
   const handleApprove = useCallback(
     async (targetUser: AppUser) => {
+      if (approvingUserId) return;
       try {
+        setApprovingUserId(targetUser.id);
         const updated = await approveAdmin(targetUser.id);
         setUsers((current) => current.map((entry) => (entry.id === updated.id ? updated : entry)));
         Alert.alert('Approved', `${targetUser.fullName} now has admin access.`);
       } catch (error) {
         Alert.alert('Approval failed', error instanceof Error ? error.message : 'Unable to approve this account.');
+      } finally {
+        setApprovingUserId(null);
       }
     },
-    [approveAdmin],
+    [approveAdmin, approvingUserId],
   );
 
   const renderItem = useCallback<ListRenderItem<ManageUserListItem>>(
@@ -272,9 +282,15 @@ export function ManageUsersScreen() {
         return <StudentAccessCard user={item.user} onAssignBatch={handleAssignBatch} batchOptions={batchOptions} />;
       }
 
-      return <AdminApprovalCard user={item.user} onApprove={handleApprove} />;
+      return (
+        <AdminApprovalCard
+          user={item.user}
+          onApprove={handleApprove}
+          isApproving={approvingUserId === item.user.id}
+        />
+      );
     },
-    [batchOptions, handleApprove, handleAssignBatch],
+    [approvingUserId, batchOptions, handleApprove, handleAssignBatch],
   );
 
   const handleSearchSubmit = useCallback(() => {

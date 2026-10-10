@@ -13,11 +13,11 @@ export function Card({ children, style }: PropsWithChildren<CardProps>) {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.surfaceRaised,
-    borderRadius: radius.xl,
-    padding: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    padding: spacing.lg,
     borderWidth: 1,
     borderColor: colors.border,
-    ...shadows.card,
+    ...shadows.soft,
   },
 });

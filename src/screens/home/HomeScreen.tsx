@@ -138,7 +138,7 @@ export function HomeScreen({ navigation }: MainTabScreenProps<'Home'>) {
   const latestRank = userResults[0]?.rank ?? 0;
   const resolvedRank = user && user.rank > 0 ? user.rank : latestRank;
   const rankLabel = resolvedRank > 0 ? `#${resolvedRank}` : 'Not ranked yet';
-  const averageScoreLabel = `${resolvedAverageScore}%`;
+  const averageScoreLabel = `${resolvedAverageScore} pts`;
 
   const visibleSections = HOME_SECTIONS;
 

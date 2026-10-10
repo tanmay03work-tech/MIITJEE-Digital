@@ -1,5 +1,20 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, AppState, AppStateStatus, BackHandler, FlatList, Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  AppState,
+  AppStateStatus,
+  BackHandler,
+  FlatList,
+  Image,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Flag, LayoutGrid, Timer, X, AlertCircle } from 'lucide-react-native';
 import Animated, { FadeInUp, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
@@ -15,15 +30,21 @@ import { Screen } from '../../components/common/Screen';
 import { OptionCard } from '../../components/tests/OptionCard';
 import { QuestionPaletteSheet } from '../../components/tests/QuestionPaletteSheet';
 import { QuestionBodyRenderer } from '../../components/tests/QuestionBodyRenderer';
+import { SubmitConfirmationModal } from '../../components/tests/SubmitConfirmationModal';
 import { RootStackScreenProps } from '../../navigation/types';
-import { fetchExistingAttemptForTest, logViolation, fetchTests } from '../../services/api/tests';
+import { fetchExistingAttemptForTest, logViolation, logExamLifecycleEvent, fetchTests } from '../../services/api/tests';
 import { activityLog } from '../../services/api/activityLogger';
 import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
 import { useTestSessionStore } from '../../store/testSessionStore';
-import { colors, radius, spacing } from '../../theme';
-import { TestItem, TestQuestion } from '../../types';
+import { colors, radius, spacing, shadows } from '../../theme';
+import { SubmittedTestResponse, TestItem, TestQuestion } from '../../types';
 import { getEligibility } from '../../utils/accessControl';
+import {
+  clearAttemptSnapshot,
+  loadAttemptSnapshot,
+  saveAttemptSnapshot,
+} from '../../utils/attemptStorage';
 import { formatExamTextForDisplay } from '../../utils/examText';
 import { formatClock } from '../../utils/formatters';
 import { normalizeNumericAnswer } from '../../utils/numericAnswer';
@@ -98,6 +119,7 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
   const [isSessionReady, setIsSessionReady] = useState(false);
   const [warningMessage, setWarningMessage] = useState<string>();
   const [violationCount, setViolationCount] = useState(0);
+  const [showSubmitModal, setShowSubmitModal] = useState(false);
 
   const user = useAuthStore((state) => state.user);
   const loadQuestions = useAppStore((state) => state.loadQuestions);
@@ -110,6 +132,8 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
   const questions = useTestSessionStore((s) => s.questions);
   const answers = useTestSessionStore((s) => s.answers);
   const flaggedQuestionIds = useTestSessionStore((s) => s.flaggedQuestionIds);
+  const secondsRemaining = useTestSessionStore((s) => s.secondsRemaining);
+  const submissionState = useTestSessionStore((s) => s.submissionState);
   const currentIndex = useTestSessionStore((s) => s.currentIndex);
   const startSession = useTestSessionStore((s) => s.startSession);
   const selectAnswer = useTestSessionStore((s) => s.selectAnswer);
@@ -142,6 +166,23 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
 
     return () => clearTimeout(timeout);
   }, [warningMessage]);
+
+  useEffect(() => {
+    if (!test || !isSessionReady || !user) return;
+    const sessionState = useTestSessionStore.getState();
+    void saveAttemptSnapshot({
+      testId: test.id,
+      userId: user.id,
+      answers: sessionState.answers,
+      flaggedQuestionIds: sessionState.flaggedQuestionIds,
+      secondsRemaining: sessionState.secondsRemaining,
+      startedAt: sessionState.startedAt || undefined,
+      expiresAt: sessionState.expiresAt || undefined,
+      studentName: sessionState.studentName || undefined,
+      isPendingSync: false,
+      submissionState: sessionState.submissionState,
+    });
+  }, [answers, flaggedQuestionIds, isSessionReady, test, user]);
 
   const persistViolationCount = useCallback(async (count: number) => {
     if (!violationStorageKey) {
@@ -240,11 +281,44 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
           return;
         }
 
-        const resolvedStudentName = route.params?.studentName || useTestSessionStore.getState().studentName || user?.fullName || 'Student';
-        startSession(activeTest, fetchedQuestions, resolvedStudentName);
+        const snapshot = await loadAttemptSnapshot(activeTest.id);
+        const resolvedStudentName =
+          route.params?.studentName ||
+          snapshot?.studentName ||
+          useTestSessionStore.getState().studentName ||
+          user?.fullName ||
+          'Student';
+
+        if (snapshot && snapshot.userId === user?.id) {
+          startSession(
+            activeTest,
+            fetchedQuestions,
+            resolvedStudentName,
+            snapshot.answers,
+            snapshot.flaggedQuestionIds,
+            snapshot.startedAt,
+            snapshot.expiresAt,
+            snapshot.submissionState,
+          );
+        } else {
+          startSession(activeTest, fetchedQuestions, resolvedStudentName);
+        }
+
         if (isMounted) {
           setIsSessionReady(true);
           setSessionError(undefined);
+        }
+
+        const currentSession = useTestSessionStore.getState();
+        if (
+          currentSession.submissionState === 'SUBMITTING' ||
+          currentSession.submissionState === 'RETRY_PENDING' ||
+          (currentSession.expiresAt && new Date(currentSession.expiresAt).getTime() <= Date.now())
+        ) {
+          if (!autoSubmittedRef.current && isMounted) {
+            autoSubmittedRef.current = true;
+            void handleSubmit(true);
+          }
         }
       } catch (error) {
         if (!isMounted) {
@@ -283,7 +357,7 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
 
     const interval = setInterval(() => {
       const state = useTestSessionStore.getState();
-      if (state.questions.length > 0 && state.secondsRemaining > 0) {
+      if (state.questions.length > 0) {
         state.tick();
       }
     }, 1000);
@@ -323,97 +397,216 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
     };
   }, [isWeeklyProctored, violationStorageKey]);
 
-  const handleSubmit = useCallback(
+  const executeSubmit = useCallback(
     async (isAutoSubmit = false) => {
-      if (!test || isSubmitting || submitInFlightRef.current) {
+      if (!test || submitInFlightRef.current) {
         return;
       }
+      submitInFlightRef.current = true;
 
-      const executeSubmit = async () => {
-        if (submitInFlightRef.current) return;
-        submitInFlightRef.current = true;
+      const activeStudentName =
+        route.params?.studentName ||
+        useTestSessionStore.getState().studentName ||
+        user?.fullName ||
+        'Student';
+      const activeUserId = user?.id || 'guest_user';
+      const liveAnswers = useTestSessionStore.getState().answers;
+      const liveQuestions = useTestSessionStore.getState().questions;
+      const pendingKey = `@cbt_pending_sub_${test.id}_${activeUserId}`;
 
+      // 1. Buffer attempt state locally before network execution
+      useTestSessionStore.getState().setSubmissionState('SUBMITTING');
+      if (user) {
+        void saveAttemptSnapshot({
+          testId: test.id,
+          userId: activeUserId,
+          answers: liveAnswers,
+          flaggedQuestionIds: useTestSessionStore.getState().flaggedQuestionIds,
+          secondsRemaining: 0,
+          startedAt: useTestSessionStore.getState().startedAt || undefined,
+          expiresAt: useTestSessionStore.getState().expiresAt || undefined,
+          studentName: activeStudentName,
+          isPendingSync: true,
+          submissionState: 'SUBMITTING',
+        });
+      }
+
+      try {
+        await AsyncStorage.setItem(
+          pendingKey,
+          JSON.stringify({
+            testId: test.id,
+            userId: activeUserId,
+            studentName: activeStudentName,
+            answers: liveAnswers,
+            submittedAt: new Date().toISOString(),
+          }),
+        );
+      } catch {
+        // Ignore async storage write errors
+      }
+
+      void logExamLifecycleEvent('SUBMISSION_STARTED', { testId: test.id }).catch(() => undefined);
+
+      if (isAutoSubmit) {
+        // Bounded client admission staggering (0-1200ms) to smooth simultaneous timer expirations across cohorts
+        const staggerJitterMs = Math.floor(Math.random() * 1200);
+        await new Promise((resolve) => setTimeout(resolve, staggerJitterMs));
+      }
+
+      // 2. Submit with automatic retry for transient network dropouts
+      let response: SubmittedTestResponse | null = null;
+      let lastError: unknown = null;
+      const maxAttempts = isAutoSubmit ? 3 : 2;
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-          const activeStudentName =
-            route.params?.studentName ||
-            useTestSessionStore.getState().studentName ||
-            user?.fullName ||
-            'Student';
-          const activeUserId = user?.id || 'guest_user';
-          const liveAnswers = useTestSessionStore.getState().answers;
-
-          const response = await submitAttempt({
+          response = await submitAttempt({
             testId: test.id,
             userId: activeUserId,
             answers: liveAnswers,
             studentName: activeStudentName,
+            questions: liveQuestions,
           });
-
-          activityLog.logExam('EXAM_SUBMITTED', {
-            userId: activeUserId,
-            studentName: activeStudentName,
-            testId: test.id,
-            testTitle: test.title,
-            score: response.result.score,
-            status: 'success',
-          });
-          void activityLog.flush();
-
-          await clearViolationState();
-          navigation.replace('TestResult', {
-            testId: test.id,
-            resultId: response.result.id,
-          });
-          reset();
-        } catch (error) {
-          const message = error instanceof Error ? error.message : 'Please try again.';
-
-          if (message.toLowerCase().includes('already given this test.')) {
-            const existingAttempt = await fetchExistingAttemptForTest(test.id, user?.id);
-            if (existingAttempt) {
-              await clearViolationState();
-              navigation.replace('TestResult', {
-                testId: test.id,
-                resultId: existingAttempt.id,
-              });
-              reset();
-              return;
-            }
+          if (response) break;
+        } catch (err) {
+          lastError = err;
+          const errStr = (err instanceof Error ? err.message : '').toLowerCase();
+          if (errStr.includes('already given') || errStr.includes('locked')) {
+            break;
           }
-
-          submitInFlightRef.current = false;
-          autoSubmittedRef.current = false;
-          Alert.alert('Submission failed', message);
+          if (attempt < maxAttempts) {
+            await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+          }
         }
-      };
+      }
 
-      if (isAutoSubmit) {
-        await executeSubmit();
+      if (response) {
+        try {
+          await AsyncStorage.removeItem(pendingKey);
+          await clearAttemptSnapshot(test.id);
+          useTestSessionStore.getState().setSubmissionState('SUBMITTED');
+        } catch {
+          // Ignore
+        }
+
+        activityLog.logExam('EXAM_SUBMITTED', {
+          userId: activeUserId,
+          studentName: activeStudentName,
+          testId: test.id,
+          testTitle: test.title,
+          score: response.result.score,
+          status: 'success',
+        });
+        void activityLog.flush();
+        void logExamLifecycleEvent('SUBMISSION_SUCCEEDED', { testId: test.id, score: response.result.score }).catch(() => undefined);
+
+        await clearViolationState();
+        navigation.replace('TestResult', {
+          testId: test.id,
+          resultId: response.result.id,
+        });
+        reset();
         return;
       }
 
-      Alert.alert(
-        'Submit Test',
-        'Are you sure you want to submit the test?',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Submit Test',
-            onPress: () => {
-              void executeSubmit();
+      // 3. Fallback for existing attempt or network failure
+      const message = lastError instanceof Error ? lastError.message : 'Please try again.';
+      if (
+        message.toLowerCase().includes('already given this test.') ||
+        message.toLowerCase().includes('existing')
+      ) {
+        try {
+          const existingAttempt = await fetchExistingAttemptForTest(test.id, user?.id);
+          if (existingAttempt) {
+            await AsyncStorage.removeItem(pendingKey).catch(() => undefined);
+            await clearAttemptSnapshot(test.id).catch(() => undefined);
+            useTestSessionStore.getState().setSubmissionState('SUBMITTED');
+            await clearViolationState();
+            navigation.replace('TestResult', {
+              testId: test.id,
+              resultId: existingAttempt.id,
+            });
+            reset();
+            return;
+          }
+        } catch {
+          // Ignore lookup error
+        }
+      }
+
+      useTestSessionStore.getState().setSubmissionState('RETRY_PENDING');
+      void logExamLifecycleEvent('SUBMISSION_FAILED', { testId: test.id, reason: message }).catch(() => undefined);
+      if (user) {
+        void saveAttemptSnapshot({
+          testId: test.id,
+          userId: activeUserId,
+          answers: liveAnswers,
+          flaggedQuestionIds: useTestSessionStore.getState().flaggedQuestionIds,
+          secondsRemaining: 0,
+          startedAt: useTestSessionStore.getState().startedAt || undefined,
+          expiresAt: useTestSessionStore.getState().expiresAt || undefined,
+          studentName: activeStudentName,
+          isPendingSync: true,
+          submissionState: 'RETRY_PENDING',
+        });
+      }
+
+      submitInFlightRef.current = false;
+      autoSubmittedRef.current = false;
+
+      if (isAutoSubmit) {
+        // Schedule background retry automatically
+        setTimeout(() => {
+          if (!submitInFlightRef.current) {
+            void executeSubmit(true);
+          }
+        }, 5000);
+
+        Alert.alert(
+          'Submission Pending',
+          'Time has expired, but server sync encountered a network issue. Your answers are safely preserved locally and will retry automatically. Tap below to retry immediately.',
+          [
+            {
+              text: 'Retry Submission Now',
+              onPress: () => {
+                void executeSubmit(true);
+              },
             },
-          },
-        ],
-        { cancelable: true },
-      );
+          ],
+          { cancelable: false },
+        );
+      } else {
+        Alert.alert('Submission failed', message);
+      }
     },
-    [answers, clearViolationState, isSubmitting, navigation, reset, submitAttempt, test, user],
+    [clearViolationState, navigation, reset, route.params?.studentName, submitAttempt, test, user],
   );
 
-  // Auto-submit when timer reaches 0
+  const handleSubmit = useCallback(
+    (isAutoSubmit = false) => {
+      if (!test || isSubmitting || submitInFlightRef.current) {
+        return;
+      }
+
+      if (isAutoSubmit) {
+        void executeSubmit(true);
+        return;
+      }
+
+      setShowSubmitModal(true);
+    },
+    [executeSubmit, isSubmitting, test],
+  );
+
+  // Auto-submit when timer reaches 0 or state transitions to TIME_EXPIRED
   useEffect(() => {
     const unsub = useTestSessionStore.subscribe((state) => {
-      if (state.secondsRemaining === 0 && state.questions.length > 0 && !autoSubmittedRef.current) {
+      if (
+        (state.secondsRemaining === 0 || state.submissionState === 'TIME_EXPIRED') &&
+        state.questions.length > 0 &&
+        !autoSubmittedRef.current
+      ) {
         autoSubmittedRef.current = true;
         void handleSubmit(true);
       }
@@ -458,7 +651,7 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
         // Best-effort local persistence to survive app restarts.
       }
 
-      void logViolation({ testId: test.id, violationType }).catch(() => undefined);
+      void logViolation({ testId: test.id, violationType, violationCount: nextCount }).catch(() => undefined);
 
       if (nextCount < AUTO_SUBMIT_THRESHOLD) {
         setWarningMessage(
@@ -487,6 +680,8 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
 
       if (previousAppState === 'active' && (nextAppState === 'background' || nextAppState === 'inactive')) {
         void handleViolation(nextAppState === 'background' ? 'app_background' : 'app_inactive');
+      } else if (previousAppState !== 'active' && nextAppState === 'active') {
+        void logExamLifecycleEvent('TAB_RETURNED', { testId: test.id }).catch(() => undefined);
       }
     });
 
@@ -503,11 +698,18 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
     const handleVisibilityChange = () => {
       if (document.hidden || document.visibilityState === 'hidden') {
         void handleViolation('web_visibility');
+      } else if (document.visibilityState === 'visible') {
+        void logExamLifecycleEvent('TAB_RETURNED', { testId: test.id }).catch(() => undefined);
       }
     };
 
     const handleWindowBlur = () => {
-      void handleViolation('web_blur');
+      // Only treat blur as a tab-switch violation if the document is actually hidden.
+      // Losing focus to an input, dialog, or iframe while the document remains visible
+      // is not a deliberate tab-switch and should not penalize the student.
+      if (document.hidden || document.visibilityState === 'hidden') {
+        void handleViolation('web_visibility');
+      }
     };
 
     if (typeof document !== 'undefined') {
@@ -574,7 +776,14 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
   const selectedAnswer = currentQuestion ? answers[currentQuestion.id] : undefined;
   const isLastQuestion = currentIndex === questions.length - 1;
   const isFlagged = currentQuestion ? flaggedQuestionIds.includes(currentQuestion.id) : false;
-  const unansweredCount = questions.length - Object.keys(answers).length;
+  const attemptedCount = useMemo(() => {
+    return questions.filter((q) => {
+      const a = answers[q.id];
+      return a !== undefined && a !== null && String(a).trim() !== '';
+    }).length;
+  }, [answers, questions]);
+  const unansweredCount = Math.max(0, questions.length - attemptedCount);
+  const flaggedCount = flaggedQuestionIds.length;
   const currentSubjectLabel = currentQuestion?.subjectLabel?.trim() || test?.subject?.trim() || 'General Section';
   const isSubjectSectionTagged = !!currentQuestion?.subjectLabel?.trim();
   const currentQuestionId = currentQuestion?.id;
@@ -909,6 +1118,33 @@ export function TestAttemptScreen({ route, navigation }: RootStackScreenProps<'T
           <Text style={styles.exitButtonText}>Exit Test</Text>
         </AnimatedPressable>
       </View>
+
+      <SubmitConfirmationModal
+        visible={showSubmitModal}
+        totalQuestions={questions.length}
+        attemptedCount={attemptedCount}
+        unattemptedCount={unansweredCount}
+        flaggedCount={flaggedCount}
+        secondsRemaining={secondsRemaining}
+        isSubmitting={isSubmitting || submissionState === 'SUBMITTING'}
+        onConfirm={() => {
+          setShowSubmitModal(false);
+          void executeSubmit(false);
+        }}
+        onCancel={() => setShowSubmitModal(false)}
+      />
+
+      {isSubmitting || submissionState === 'SUBMITTING' ? (
+        <View style={styles.submittingOverlay} pointerEvents="auto">
+          <Card style={styles.submittingCard}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={styles.submittingTitle}>Submitting Your Paper...</Text>
+            <Text style={styles.submittingSubtitle}>
+              Please do not close or reload. Your answers are being verified and saved with the server.
+            </Text>
+          </Card>
+        </View>
+      ) : null}
     </Screen>
   );
 }
@@ -1315,5 +1551,35 @@ const styles = StyleSheet.create({
     color: '#B91C1C',
     textAlign: 'center',
     maxWidth: 360,
+  },
+  submittingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: colors.overlay,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.xl,
+    zIndex: 9999,
+  },
+  submittingCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.xl,
+    padding: spacing.xxl,
+    alignItems: 'center',
+    maxWidth: 380,
+    width: '100%',
+    gap: spacing.md,
+    ...shadows.raised,
+  },
+  submittingTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  submittingSubtitle: {
+    color: colors.textMuted,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
   },
 });

@@ -2,6 +2,7 @@ import {
   coerceDurationMinutes,
   formatClock,
   formatDuration,
+  formatRemainingMinutes,
   initials,
   sanitizeDurationInput,
 } from '../formatters';
@@ -23,6 +24,14 @@ describe('formatters utility', () => {
     expect(formatDuration(45)).toBe('45 min');
     expect(formatDuration(60)).toBe('1h');
     expect(formatDuration(135)).toBe('2h 15m');
+  });
+
+  test('formatRemainingMinutes formats seconds remaining into minutes (e.g. 10740s -> 179 mins, not hours)', () => {
+    expect(formatRemainingMinutes(10740)).toBe('179 mins');
+    expect(formatRemainingMinutes(10800)).toBe('180 mins');
+    expect(formatRemainingMinutes(60)).toBe('1 min');
+    expect(formatRemainingMinutes(45)).toBe('1 min');
+    expect(formatRemainingMinutes(0)).toBe('0 mins');
   });
 
   test('formatClock formats total seconds into clock display', () => {

@@ -4,7 +4,7 @@ import { Clock, HelpCircle, ShieldAlert, CheckCircle2 } from 'lucide-react-nativ
 
 import { AnimatedPressable } from '../common/AnimatedPressable';
 import { colors, radius, spacing } from '../../theme';
-import { formatDuration } from '../../utils/formatters';
+import { formatRemainingMinutes } from '../../utils/formatters';
 
 interface SubmitConfirmationModalProps {
   visible: boolean;
@@ -29,7 +29,7 @@ export function SubmitConfirmationModal({
   onConfirm,
   onCancel,
 }: SubmitConfirmationModalProps) {
-  const formattedTimeRemaining = formatDuration(secondsRemaining);
+  const formattedTimeRemaining = formatRemainingMinutes(secondsRemaining);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
@@ -91,14 +91,14 @@ export function SubmitConfirmationModal({
               disabled={isSubmitting}
               style={[styles.button, styles.cancelButton]}
               onPress={onCancel}>
-              <Text style={styles.cancelButtonText}>Return to Exam</Text>
+              <Text style={styles.cancelButtonText}>Continue Exam</Text>
             </AnimatedPressable>
 
             <AnimatedPressable
               disabled={isSubmitting}
               style={[styles.button, styles.confirmButton, isSubmitting && styles.disabledButton]}
               onPress={onConfirm}>
-              <Text style={styles.confirmButtonText}>{isSubmitting ? 'Submitting...' : 'Confirm & Submit'}</Text>
+              <Text style={styles.confirmButtonText}>{isSubmitting ? 'Submitting Paper...' : 'Submit Paper'}</Text>
             </AnimatedPressable>
           </View>
         </View>

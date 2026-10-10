@@ -86,9 +86,9 @@ export interface TestQuestionRow {
   question_type: 'mcq' | 'integer';
   prompt: string;
   options: string[];
-  correct_answer: string;
-  integer_answer: number | null;
-  explanation: string;
+  correct_answer?: string;
+  integer_answer?: number | null;
+  explanation?: string;
   image_url: string | null;
   option_image_urls?: string[] | null;
   source_page?: number | null;
@@ -167,6 +167,7 @@ export interface ReviewRow {
   is_unattempted?: boolean;
   explanation: string;
   image_url: string | null;
+  subject?: string | null;
 }
 
 export interface QuestionAnalyticsRow {

@@ -99,10 +99,10 @@ export function ProfileScreen() {
           </View>
           <View style={styles.metric}>
             <Text style={styles.metricValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.86}>
-              {user.averageScore}%
+              {user.averageScore}
             </Text>
             <Text style={styles.metricLabel} numberOfLines={1}>
-              Average
+              Avg Marks
             </Text>
           </View>
         </View>

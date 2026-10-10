@@ -89,35 +89,15 @@ export function TestIntroScreen({ route, navigation }: RootStackScreenProps<'Tes
     }
   };
 
-  if (!test && isBootstrapping) {
-    return (
-      <Screen contentContainerStyle={styles.loadingContent}>
-        <AppHeader title="Loading Test Details" subtitle="Checking paper status and access." showLogo={false} />
-        <BrandLoadingState title="Preparing this paper" subtitle="Verifying schedule, access, and result status for your account." />
-      </Screen>
-    );
-  }
-
-  if (!test) {
-    return (
-      <Screen contentContainerStyle={styles.content}>
-        <AppHeader title="Test Details" subtitle="This test is no longer available" showLogo={false} />
-      </Screen>
-    );
-  }
-
-  const eligibility = getEligibility(user, test);
-  const testActive = isTestActive(test);
-  const statusLabel = getTestStatusLabel(test);
   const batchCards = useMemo(() => batches.slice(0, 6), [batches]);
   const cachedExistingAttempt = results.find(
-    (entry) => (user?.id ? entry.userId === user.id : entry.userId === 'guest_user') && entry.testId === test.id
+    (entry) => (user?.id ? entry.userId === user.id : entry.userId === 'guest_user') && entry.testId === test?.id
   );
   const [existingAttempt, setExistingAttempt] = useState<TestResult | null | undefined>(cachedExistingAttempt);
 
   useEffect(() => {
     setExistingAttempt(cachedExistingAttempt);
-  }, [user?.id, test.id]);
+  }, [user?.id, test?.id, cachedExistingAttempt]);
 
   useEffect(() => {
     let isMounted = true;
@@ -148,6 +128,27 @@ export function TestIntroScreen({ route, navigation }: RootStackScreenProps<'Tes
       isMounted = false;
     };
   }, [test?.id, user?.id, user?.fullName, cachedExistingAttempt?.id]);
+
+  if (!test && isBootstrapping) {
+    return (
+      <Screen contentContainerStyle={styles.loadingContent}>
+        <AppHeader title="Loading Test Details" subtitle="Checking paper status and access." showLogo={false} />
+        <BrandLoadingState title="Preparing this paper" subtitle="Verifying schedule, access, and result status for your account." />
+      </Screen>
+    );
+  }
+
+  if (!test) {
+    return (
+      <Screen contentContainerStyle={styles.content}>
+        <AppHeader title="Test Details" subtitle="This test is no longer available" showLogo={false} />
+      </Screen>
+    );
+  }
+
+  const eligibility = getEligibility(user, test);
+  const testActive = isTestActive(test);
+  const statusLabel = getTestStatusLabel(test);
 
   const handleCheckReattemptStatus = async () => {
     if (!test?.id) return;

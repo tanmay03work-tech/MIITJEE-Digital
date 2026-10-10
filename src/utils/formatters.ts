@@ -30,6 +30,12 @@ export function formatDuration(minutes: number) {
   return `${safeMinutes} min`;
 }
 
+export function formatRemainingMinutes(totalSeconds: number) {
+  const safeSeconds = Math.max(0, totalSeconds);
+  const minutes = Math.ceil(safeSeconds / 60);
+  return `${minutes} ${minutes === 1 ? 'min' : 'mins'}`;
+}
+
 export function formatDateLabel(isoString: string) {
   const date = new Date(isoString);
   return date.toLocaleDateString('en-IN', {

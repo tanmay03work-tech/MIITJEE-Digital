@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { colors, radius, spacing } from '../../theme';
+import { FormattedExamText } from '../common/FormattedExamText';
 import { formatExamTextForDisplay } from '../../utils/examText';
 import { DiagramHolder } from './DiagramHolder';
 
@@ -142,7 +143,7 @@ export function QuestionBodyRenderer({ prompt, imageUrl }: QuestionBodyRendererP
     return (
       <View style={styles.container}>
         {matchData.intro ? (
-          <Text style={styles.mainPromptText}>{formatExamTextForDisplay(matchData.intro)}</Text>
+          <FormattedExamText style={styles.mainPromptText} text={matchData.intro} />
         ) : null}
 
         {imageUrl ? <DiagramHolder imageUrl={imageUrl} /> : null}
@@ -155,14 +156,14 @@ export function QuestionBodyRenderer({ prompt, imageUrl }: QuestionBodyRendererP
               <View style={styles.listBadge1}>
                 <Text style={styles.listBadgeText1}>COLUMN 1</Text>
               </View>
-              <Text style={styles.matchHeaderTitle}>{formatExamTextForDisplay(matchData.list1Title)}</Text>
+              <FormattedExamText style={styles.matchHeaderTitle} text={matchData.list1Title} />
             </View>
             <View style={styles.verticalDivider} />
             <View style={[styles.matchHeaderCol, styles.colRight]}>
               <View style={styles.listBadge2}>
                 <Text style={styles.listBadgeText2}>COLUMN 2</Text>
               </View>
-              <Text style={styles.matchHeaderTitle}>{formatExamTextForDisplay(matchData.list2Title)}</Text>
+              <FormattedExamText style={styles.matchHeaderTitle} text={matchData.list2Title} />
             </View>
           </View>
 
@@ -177,18 +178,18 @@ export function QuestionBodyRenderer({ prompt, imageUrl }: QuestionBodyRendererP
               ]}
             >
               <View style={[styles.matchCol, styles.colLeft]}>
-                <Text style={styles.matchItemText}>{formatExamTextForDisplay(row.item1)}</Text>
+                <FormattedExamText style={styles.matchItemText} text={row.item1} />
               </View>
               <View style={styles.verticalDivider} />
               <View style={[styles.matchCol, styles.colRight]}>
-                <Text style={styles.matchItemText}>{formatExamTextForDisplay(row.item2)}</Text>
+                <FormattedExamText style={styles.matchItemText} text={row.item2} />
               </View>
             </View>
           ))}
         </View>
 
         {matchData.outro ? (
-          <Text style={styles.outroText}>{formatExamTextForDisplay(matchData.outro)}</Text>
+          <FormattedExamText style={styles.outroText} text={matchData.outro} />
         ) : null}
       </View>
     );
@@ -199,14 +200,14 @@ export function QuestionBodyRenderer({ prompt, imageUrl }: QuestionBodyRendererP
     return (
       <View style={styles.container}>
         {statementData.leadIn ? (
-          <Text style={styles.mainPromptText}>{formatExamTextForDisplay(statementData.leadIn)}</Text>
+          <FormattedExamText style={styles.mainPromptText} text={statementData.leadIn} />
         ) : null}
 
         <View style={styles.statementCard}>
           <View style={styles.statementBadge}>
             <Text style={styles.statementBadgeText}>STATEMENT 1</Text>
           </View>
-          <Text style={styles.statementText}>{formatExamTextForDisplay(statementData.statement1)}</Text>
+          <FormattedExamText style={styles.statementText} text={statementData.statement1} />
         </View>
 
         {imageUrl ? <DiagramHolder imageUrl={imageUrl} /> : null}
@@ -215,11 +216,11 @@ export function QuestionBodyRenderer({ prompt, imageUrl }: QuestionBodyRendererP
           <View style={styles.statementBadge}>
             <Text style={styles.statementBadgeText}>STATEMENT 2</Text>
           </View>
-          <Text style={styles.statementText}>{formatExamTextForDisplay(statementData.statement2)}</Text>
+          <FormattedExamText style={styles.statementText} text={statementData.statement2} />
         </View>
 
         {statementData.outro ? (
-          <Text style={styles.outroText}>{formatExamTextForDisplay(statementData.outro)}</Text>
+          <FormattedExamText style={styles.outroText} text={statementData.outro} />
         ) : null}
       </View>
     );
@@ -228,7 +229,7 @@ export function QuestionBodyRenderer({ prompt, imageUrl }: QuestionBodyRendererP
   // Case 3: Standard Question Text + Diagram Holder
   return (
     <View style={styles.container}>
-      <Text style={styles.mainPromptText}>{formatExamTextForDisplay(prompt)}</Text>
+      <FormattedExamText style={styles.mainPromptText} text={prompt} />
       {imageUrl ? <DiagramHolder imageUrl={imageUrl} /> : null}
     </View>
   );

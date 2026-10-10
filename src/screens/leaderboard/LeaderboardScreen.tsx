@@ -39,13 +39,13 @@ const LeaderboardRow = memo(function LeaderboardRow({ entry, scope }: { entry: L
         <Text style={styles.rowName}>{entry.fullName}</Text>
         <Text style={styles.rowMeta}>
           {scope === 'overall_history'
-            ? `${entry.batchId ?? 'Open category'} | ${entry.testsAttempted ?? 0} tests | P${entry.percentile}`
-            : `${entry.batchId ?? 'Batch cohort'} | Score ${entry.score}% | P${entry.percentile}`}
+            ? `${entry.batchId ?? 'Open category'} | ${entry.testsAttempted ?? 0} tests | Avg: ${entry.score} pts`
+            : `${entry.batchId ?? 'Batch cohort'} | Raw: ${entry.score} marks`}
         </Text>
       </View>
       <View style={styles.rowScore}>
         <Text style={styles.rowRank}>#{entry.rank}</Text>
-        <Text style={styles.rowValue}>{`${entry.score}%`}</Text>
+        <Text style={styles.rowValue}>{`${entry.percentile} %ile`}</Text>
       </View>
     </Card>
   );
@@ -60,7 +60,7 @@ export function LeaderboardScreen() {
   const isAdmin = user?.role === 'admin' && user.approvalStatus === 'approved';
 
   const [scope, setScope] = useState<LeaderboardScope>('overall_history');
-  const [selectedBatchId, setSelectedBatchId] = useState<string | undefined>(user?.batchId);
+  const [selectedBatchId, setSelectedBatchId] = useState<string | undefined>(user?.batchId ?? '');
   const [selectedTestId, setSelectedTestId] = useState<string>();
   const [leaderboardLimit, setLeaderboardLimit] = useState<number>(DEFAULT_LEADERBOARD_LIMIT);
   const [reloadKey, setReloadKey] = useState(0);
@@ -72,23 +72,39 @@ export function LeaderboardScreen() {
   const [error, setError] = useState<string>();
 
   useEffect(() => {
-    if (isAdmin) {
-      if (!selectedBatchId && batches[0]?.id) {
-        setSelectedBatchId(batches[0].id);
-      }
-      return;
+    if (!isAdmin && user?.batchId && selectedBatchId === undefined) {
+      setSelectedBatchId(user.batchId);
     }
+  }, [isAdmin, selectedBatchId, user?.batchId]);
 
-    setSelectedBatchId(user?.batchId);
-  }, [batches, isAdmin, selectedBatchId, user?.batchId]);
+  const effectiveBatchId = selectedBatchId && selectedBatchId.trim() ? selectedBatchId.trim() : null;
+  const batchLabel = effectiveBatchId
+    ? (batches.find((batch) => batch.id.trim().toUpperCase() === effectiveBatchId.trim().toUpperCase())?.label ?? effectiveBatchId)
+    : 'All Batches (Institution)';
 
-  const effectiveBatchId = isAdmin ? selectedBatchId : user?.batchId;
-  const batchLabel =
-    batches.find((batch) => batch.id === effectiveBatchId)?.label ??
-    (effectiveBatchId ? effectiveBatchId : undefined);
+  const batchOptions = useMemo(
+    () => [
+      {
+        label: 'All Batches (Institution)',
+        value: '',
+        description: 'Open leaderboard across all batches',
+      },
+      ...batches.map((batch) => ({
+        label: batch.label,
+        value: batch.id,
+        description: `${batch.targetExam} | ${batch.classLabel}`,
+      })),
+    ],
+    [batches],
+  );
 
   const availableTests = useMemo(
-    () => tests.filter((test) => test.batchId === effectiveBatchId),
+    () =>
+      tests.filter((test) => {
+        if (!effectiveBatchId) return true;
+        if (!test.batchId) return true;
+        return test.batchId.trim().toUpperCase() === effectiveBatchId.trim().toUpperCase();
+      }),
     [effectiveBatchId, tests],
   );
   const selectedTest = availableTests.find((test) => test.id === selectedTestId);
@@ -111,22 +127,14 @@ export function LeaderboardScreen() {
   }, [availableTests, scope, selectedTestId]);
 
   useEffect(() => {
-    if (!isAdmin && scope === 'overall_history' && leaderboard.length > 0) {
+    if (!effectiveBatchId && scope === 'overall_history' && leaderboard.length > 0) {
       setEntries(leaderboard.slice(0, leaderboardLimit));
       setCurrentUserEntry(leaderboard.find((entry) => entry.userId === user?.id));
     }
-  }, [isAdmin, leaderboard, leaderboardLimit, scope, user?.id]);
+  }, [effectiveBatchId, leaderboard, leaderboardLimit, scope, user?.id]);
 
   useEffect(() => {
     let active = true;
-
-    if (!effectiveBatchId) {
-      setEntries([]);
-      setError(undefined);
-      return () => {
-        active = false;
-      };
-    }
 
     if (scope === 'test_wise' && !selectedTestId) {
       setEntries([]);
@@ -141,7 +149,7 @@ export function LeaderboardScreen() {
         setLoading(true);
         const resolved = await loadLeaderboard({
           scope,
-          batchId: isAdmin ? effectiveBatchId : null,
+          batchId: effectiveBatchId,
           testId: scope === 'test_wise' ? selectedTestId : undefined,
         });
 
@@ -167,14 +175,16 @@ export function LeaderboardScreen() {
     return () => {
       active = false;
     };
-  }, [effectiveBatchId, isAdmin, leaderboardLimit, loadLeaderboard, reloadKey, scope, selectedTestId, user?.id]);
+  }, [effectiveBatchId, leaderboardLimit, loadLeaderboard, reloadKey, scope, selectedTestId, user?.id]);
 
   const subtitle =
     scope === 'overall_history'
-      ? `${batchLabel ?? 'Your'} batch ranking across full test history`
+      ? effectiveBatchId
+        ? `${batchLabel} ranking across full test history`
+        : 'Institution-wide ranking across all batches'
       : selectedTest
-        ? `${selectedTest.title} ranking for ${batchLabel ?? 'your batch'}`
-        : 'Pick a test to view batch-wise paper rankings';
+        ? `${selectedTest.title} ranking ${effectiveBatchId ? `for ${batchLabel}` : '(All Batches)'}`
+        : 'Pick a test to view paper rankings';
 
   const listHeader = useMemo(
     () => (
@@ -219,26 +229,15 @@ export function LeaderboardScreen() {
           </View>
 
           <View style={styles.metaRow}>
-            {isAdmin ? (
-              <SelectField
-                label="Batch"
-                value={selectedBatchId}
-                placeholder="Select batch"
-                menuTitle="Choose batch"
-                options={batches.map((batch) => ({
-                  label: batch.label,
-                  value: batch.id,
-                  description: `${batch.targetExam} | ${batch.classLabel}`,
-                }))}
-                onValueChange={setSelectedBatchId}
-                style={styles.controlField}
-              />
-            ) : (
-              <View style={styles.batchInfo}>
-                <Text style={styles.batchLabel}>Your Batch</Text>
-                <Badge label={batchLabel ?? 'Not assigned'} tone="primary" />
-              </View>
-            )}
+            <SelectField
+              label="Batch"
+              value={selectedBatchId ?? ''}
+              placeholder="All Batches (Institution)"
+              menuTitle="Choose batch filter"
+              options={batchOptions}
+              onValueChange={(val) => setSelectedBatchId(val || '')}
+              style={styles.controlField}
+            />
 
             {scope === 'test_wise' ? (
               <SelectField
@@ -267,8 +266,8 @@ export function LeaderboardScreen() {
                 <Text style={styles.currentUserName}>{currentUserEntry.fullName}</Text>
                 <Text style={styles.currentUserMeta}>
                   {scope === 'overall_history'
-                    ? `Rank #${currentUserEntry.rank} | Avg score ${currentUserEntry.score}% | Avg percentile P${currentUserEntry.percentile} | ${currentUserEntry.testsAttempted ?? 0} tests`
-                    : `Rank #${currentUserEntry.rank} | Score ${currentUserEntry.score}% | Percentile P${currentUserEntry.percentile}`}
+                    ? `Rank #${currentUserEntry.rank} | Percentile: ${currentUserEntry.percentile} %ile | Avg Marks: ${currentUserEntry.score} pts | ${currentUserEntry.testsAttempted ?? 0} tests`
+                    : `Rank #${currentUserEntry.rank} | Percentile: ${currentUserEntry.percentile} %ile | Raw Marks: ${currentUserEntry.score} marks`}
                 </Text>
               </View>
               <Badge label="Current User" tone="primary" />
@@ -281,12 +280,14 @@ export function LeaderboardScreen() {
               <View style={styles.currentUserText}>
                 <Text style={styles.currentUserName}>{user.fullName}</Text>
                 <Text style={styles.currentUserMeta}>
-                  {user.rank > 0
-                    ? `Overall Profile Rank #${user.rank} | Avg score ${user.averageScore}%`
-                    : 'No test submissions recorded yet for this selection. Complete a paper to see your rank here.'}
+                  {isAdmin
+                    ? 'Administrator Overview — Monitoring official ranks across all enrolled candidates.'
+                    : user.rank > 0
+                      ? `Overall Profile Rank #${user.rank} | Avg Marks: ${user.averageScore} pts`
+                      : 'No test submissions recorded yet for this selection. Complete a paper to see your rank here.'}
                 </Text>
               </View>
-              <Badge label="Your Profile" tone="primary" />
+              <Badge label={isAdmin ? 'Admin View' : 'Your Profile'} tone={isAdmin ? 'neutral' : 'primary'} />
             </Card>
           </View>
         ) : null}
@@ -302,7 +303,7 @@ export function LeaderboardScreen() {
     [
       availableTests,
       batchLabel,
-      batches,
+      batchOptions,
       currentUserEntry,
       entries.length,
       isAdmin,
@@ -311,6 +312,7 @@ export function LeaderboardScreen() {
       selectedBatchId,
       selectedTestId,
       subtitle,
+      user,
     ],
   );
 
@@ -324,24 +326,20 @@ export function LeaderboardScreen() {
     <EmptyState
       icon={Trophy}
       title="Leaderboard will unlock after submissions"
-      description="Once students from this batch complete papers, the ranking will appear here."
+      description={
+        effectiveBatchId
+          ? `Once students from ${batchLabel} complete papers, the ranking will appear here.`
+          : 'Once students complete papers, the institution-wide ranking will appear here.'
+      }
     />
   );
 
-  if (!effectiveBatchId) {
+  if (scope === 'test_wise' && availableTests.length === 0) {
     emptyState = (
       <EmptyState
         icon={Trophy}
-        title="Batch required for leaderboard"
-        description="Assign the student to a batch first, then the batch-only leaderboard will appear here."
-      />
-    );
-  } else if (scope === 'test_wise' && availableTests.length === 0) {
-    emptyState = (
-      <EmptyState
-        icon={Trophy}
-        title="No tests in this batch yet"
-        description="Create or publish a batch test first, then test-wise rankings will show up here."
+        title="No tests available yet"
+        description="Create or publish a test first, then test-wise rankings will show up here."
       />
     );
   } else if (scope === 'test_wise' && !selectedTestId) {
@@ -349,7 +347,7 @@ export function LeaderboardScreen() {
       <EmptyState
         icon={Trophy}
         title="Select a test"
-        description="Choose a batch paper to see who attempted it and how the batch ranking looks."
+        description="Choose a paper to see who attempted it and how the rankings look."
       />
     );
   }

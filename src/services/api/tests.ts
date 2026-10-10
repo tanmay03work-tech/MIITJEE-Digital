@@ -4,8 +4,6 @@ import {
   ExamLinkResolution,
   LeaderboardEntry,
   LeaderboardScope,
-  PdfImportPayload,
-  PdfImportResponse,
   ScholarshipRegistrationPayload,
   StudentInsights,
   SubmitAttemptPayload,
@@ -19,14 +17,13 @@ import { appEnv, assertWorkerConfig } from '../../config/env';
 import { logError, logInfo, logWarn } from '../../utils/logger';
 import { areNumericAnswersEquivalent, normalizeNumericAnswer } from '../../utils/numericAnswer';
 import { endpoints } from './config';
-import { processVisualPdfImport } from '../pdf/visualPdfImporter';
 import { Platform } from 'react-native';
 import { activityLog } from './activityLogger';
 import { useAuthStore } from '../../store/authStore';
-import { getAuthenticatedAccessToken, insertRow, invokeEdgeFunction, rpc, selectRows } from '../supabase/client';
-import { mapLeaderboard, mapPdfImportQuestion, mapQuestion, mapResult, mapReviewRow, mapStudentInsights, mapSubmittedAttempt, mapTest } from '../supabase/mappers';
+import { useAppStore } from '../../store/appStore';
+import { getAuthenticatedAccessToken, insertRow, invokeEdgeFunction, rpc, selectRows, updateRows } from '../supabase/client';
+import { mapLeaderboard, mapQuestion, mapResult, mapReviewRow, mapStudentInsights, mapSubmittedAttempt, mapTest } from '../supabase/mappers';
 import { LeaderboardRow, ResultRow, ReviewRow, StudentInsightsRpcResponse, SubmitAttemptRpcResponse, TestQuestionRow, TestRow } from '../supabase/types';
-import { PDFDocument } from 'pdf-lib';
 import { uploadExamAsset } from './storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { invalidateAdminCache } from './admin';
@@ -102,70 +99,7 @@ export async function getLocalStandardAttemptReviews(resultId: string): Promise<
   return null;
 }
 
-async function invokeWorkerPdfImport(body: Record<string, unknown>, timeoutMs = 240_000) {
-  assertWorkerConfig();
-  const accessToken = await getAuthenticatedAccessToken();
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    console.log('[PDF-IMPORT-DEBUG] 3. endpoint being called:', `${appEnv.workerBaseUrl}/import-pdf`);
-    const response = await fetch(`${appEnv.workerBaseUrl}/import-pdf`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-dev-mode': 'true',
-        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-
-    console.log('[PDF-IMPORT-DEBUG] 4. HTTP response status:', response.status, response.statusText);
-
-    if (!response.ok) {
-      let message = 'Worker import failed.';
-      try {
-        const errorBody = (await response.json()) as { error?: string; message?: string };
-        message = errorBody.error ?? errorBody.message ?? message;
-      } catch {
-        message = response.statusText || message;
-      }
-      throw new Error(message);
-    }
-
-    const data = (await response.json()) as PdfImportResponse;
-    console.log('[PDF-IMPORT-DEBUG] 5. response JSON keys:', Object.keys(data || {}));
-    console.log('[PDF-IMPORT-DEBUG] 6. number of questions returned from worker endpoint:', data?.questions?.length ?? 0);
-    return data;
-  } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error('The PDF import took too long. Please try again.');
-    }
-
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function shouldFallbackToEdgePdfImport(error: unknown) {
-  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-
-  return !(
-    message.includes('admin access required') ||
-    message.includes('invalid session') ||
-    message.includes('missing authorization') ||
-    message.includes('please sign in again') ||
-    message.includes('gemini_api_key') ||
-    message.includes('api_key') ||
-    message.includes('not configured') ||
-    message.includes('pdf is larger than 20mb') ||
-    message.includes('pdfurl must be a non-empty string') ||
-    message.includes('request body must be a json object')
-  );
-}
 
 export async function fetchTests(): Promise<TestItem[]> {
   const signedInUser = useAuthStore.getState().user;
@@ -234,12 +168,12 @@ export async function fetchTests(): Promise<TestItem[]> {
 }
 
 function isUuid(id: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 }
 
 export async function fetchQuestions(testId: string, _testTitle?: string): Promise<TestQuestion[]> {
   try {
-    const rpcRows = await rpc<TestQuestionRow[]>(endpoints.tests.availableQuestions, {
+    const rpcRows = await rpc<TestQuestionRow[]>(endpoints.tests.studentQuestions, {
       p_test_id: testId,
     }, {
       retryable: true,
@@ -258,23 +192,20 @@ export async function fetchQuestions(testId: string, _testTitle?: string): Promi
     ) {
       throw error;
     }
-  }
 
-  try {
-    const directRows = await selectRows<TestQuestionRow>(
-      endpoints.tests.questions,
-      'id,test_id,question_type,prompt,options,correct_answer,integer_answer,explanation,image_url,subject_label',
-      {
-        test_id: `eq.${testId}`,
-        order: 'position.asc',
-      },
-    );
-
-    if (directRows && directRows.length > 0) {
-      return directRows.map(mapQuestion);
+    // Secondary attempt with availableQuestions
+    try {
+      const fallbackRows = await rpc<TestQuestionRow[]>(endpoints.tests.availableQuestions, {
+        p_test_id: testId,
+      }, {
+        retryable: false,
+      });
+      if (fallbackRows && fallbackRows.length > 0) {
+        return fallbackRows.map(mapQuestion);
+      }
+    } catch {
+      // Insecure REST query selecting correct_answer is strictly omitted
     }
-  } catch {
-    // Direct query fallback
   }
 
   return [];
@@ -585,9 +516,17 @@ export async function submitAttempt(payload: SubmitAttemptPayload): Promise<Subm
   // Pre-normalize answers to ensure every question's UUID is populated and option letters match canonical answer format
   let normalizedAnswers: Record<string, string> = {};
   try {
-    const qList = await fetchQuestions(payload.testId);
+    // Avoid unnecessary remote question refetches during submission bursts
+    const cachedQuestions = useAppStore.getState().questionCache[payload.testId];
+    const qList =
+      payload.questions && payload.questions.length > 0
+        ? payload.questions
+        : cachedQuestions && cachedQuestions.length > 0
+          ? cachedQuestions
+          : await fetchQuestions(payload.testId);
+
     if (qList && qList.length > 0) {
-      qList.forEach((q, idx) => {
+      qList.forEach((q: TestQuestion, idx: number) => {
         const rawVal =
           payload.answers[q.id] ??
           payload.answers[`${payload.testId}_draft_${idx + 1}`] ??
@@ -611,50 +550,104 @@ export async function submitAttempt(payload: SubmitAttemptPayload): Promise<Subm
     answers: normalizedAnswers,
   };
 
-  try {
-    const response = await rpc<SubmitAttemptRpcResponse>(endpoints.tests.submit, {
-      p_test_id: effectivePayload.testId,
-      p_answers: effectivePayload.answers,
-      p_student_name: effectivePayload.studentName ?? null,
-    });
-    const mapped = mapSubmittedAttempt(response);
-    await saveLocalStandardAttempt(mapped.result, []).catch(() => undefined);
-    invalidateAdminCache();
-    logInfo('Test submission succeeded.', {
-      testId: effectivePayload.testId,
-      userId: effectivePayload.userId,
-      resultId: mapped.result.id,
-      score: mapped.result.score,
-    });
-    return mapped;
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message.toLowerCase() : '';
-    if (errorMsg.includes('candidate function') || errorMsg.includes('parameter') || errorMsg.includes('overload')) {
-      try {
-        const legacyResponse = await rpc<SubmitAttemptRpcResponse>(endpoints.tests.submit, {
-          p_test_id: effectivePayload.testId,
-          p_answers: effectivePayload.answers,
-        });
-        const legacyMapped = mapSubmittedAttempt(legacyResponse);
-        await saveLocalStandardAttempt(legacyMapped.result, []).catch(() => undefined);
-        invalidateAdminCache();
-        return legacyMapped;
-      } catch {
-        // Fall through to fallback
-      }
-    }
+  const MAX_BURST_RETRIES = 3;
+  let lastError: unknown;
 
-    logWarn('Submitting attempt via evaluated fallback:', { error: errorMsg });
-    const fallbackResult = await submitStandardAttemptDirect(effectivePayload);
-    invalidateAdminCache();
-    logInfo('Fallback test submission succeeded.', {
-      testId: effectivePayload.testId,
-      userId: effectivePayload.userId,
-      resultId: fallbackResult.result.id,
-      score: fallbackResult.result.score,
-    });
-    return fallbackResult;
+  for (let attempt = 1; attempt <= MAX_BURST_RETRIES; attempt++) {
+    try {
+      const response = await rpc<SubmitAttemptRpcResponse>(endpoints.tests.submit, {
+        p_test_id: effectivePayload.testId,
+        p_answers: effectivePayload.answers,
+        p_student_name: effectivePayload.studentName ?? null,
+      });
+      const mapped = mapSubmittedAttempt(response);
+      await saveLocalStandardAttempt(mapped.result, []).catch(() => undefined);
+      invalidateAdminCache();
+      logInfo('Test submission succeeded.', {
+        testId: effectivePayload.testId,
+        userId: effectivePayload.userId,
+        resultId: mapped.result.id,
+        score: mapped.result.score,
+        attemptNumber: attempt,
+      });
+      return mapped;
+    } catch (error) {
+      lastError = error;
+      const errorMsg = error instanceof Error ? error.message.toLowerCase() : '';
+
+      // Check for signature overload issue on legacy endpoints
+      if (errorMsg.includes('candidate function') || errorMsg.includes('parameter') || errorMsg.includes('overload')) {
+        try {
+          const legacyResponse = await rpc<SubmitAttemptRpcResponse>(endpoints.tests.submit, {
+            p_test_id: effectivePayload.testId,
+            p_answers: effectivePayload.answers,
+          });
+          const legacyMapped = mapSubmittedAttempt(legacyResponse);
+          await saveLocalStandardAttempt(legacyMapped.result, []).catch(() => undefined);
+          invalidateAdminCache();
+          return legacyMapped;
+        } catch {
+          // Fall through to retry or throw
+        }
+      }
+
+      // Check if error is transient / concurrency collision / network timeout
+      const isTransient =
+        errorMsg.includes('network') ||
+        errorMsg.includes('failed to fetch') ||
+        errorMsg.includes('timeout') ||
+        errorMsg.includes('503') ||
+        errorMsg.includes('504') ||
+        errorMsg.includes('429') ||
+        errorMsg.includes('lock') ||
+        errorMsg.includes('connection');
+
+      if (isTransient && attempt < MAX_BURST_RETRIES) {
+        // Bounded exponential backoff with randomized jitter: 200ms * 2^attempt + random(100..300ms)
+        const jitter = Math.floor(Math.random() * 200) + 100;
+        const delayMs = Math.min(2500, Math.pow(2, attempt) * 200 + jitter);
+        await new Promise((res) => setTimeout(res, delayMs));
+        continue;
+      }
+
+      break;
+    }
   }
+
+  throw lastError;
+}
+
+export function normalizeLeaderboardCohort(
+  entries: LeaderboardEntry[],
+  currentUserId?: string,
+): LeaderboardEntry[] {
+  if (!entries || entries.length === 0) return [];
+
+  // Sort candidates strictly by score DESC, then testsAttempted DESC, then fullName ASC
+  const sorted = [...entries].sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    if ((b.testsAttempted ?? 0) !== (a.testsAttempted ?? 0)) {
+      return (b.testsAttempted ?? 0) - (a.testsAttempted ?? 0);
+    }
+    return (a.fullName || '').localeCompare(b.fullName || '');
+  });
+
+  const total = sorted.length;
+
+  return sorted.map((entry, idx) => {
+    const rank = idx + 1;
+    // Official NTA cohort percentile:
+    // Percentile = 100 * (Number of candidates with score <= candidate score) / Total candidates
+    const countLessOrEqual = sorted.filter((other) => other.score <= entry.score).length;
+    const computedPercentile = total <= 1 ? 100 : Math.min(100, Math.max(1, Math.round((countLessOrEqual / total) * 100)));
+
+    return {
+      ...entry,
+      rank,
+      percentile: computedPercentile,
+      isCurrentUser: entry.isCurrentUser || (currentUserId ? entry.userId === currentUserId : false),
+    };
+  });
 }
 
 export async function fetchLeaderboard(
@@ -673,12 +666,14 @@ export async function fetchLeaderboard(
     retryable: true,
   });
 
-  return rows.map((row) =>
+  const rawEntries = rows.map((row) =>
     mapLeaderboard({
       ...row,
       is_current_user: row.user_id === currentUserId,
     }),
   );
+
+  return normalizeLeaderboardCohort(rawEntries, currentUserId);
 }
 
 export async function fetchStudentInsights(userId?: string): Promise<StudentInsights> {
@@ -713,31 +708,58 @@ export async function fetchStudentInsights(userId?: string): Promise<StudentInsi
 
 export async function logViolation(payload: {
   testId: string;
-  violationType: 'app_background' | 'app_inactive' | 'web_visibility' | 'web_blur' | 'auto_submit';
+  violationType: 'app_background' | 'app_inactive' | 'web_visibility' | 'web_blur' | 'auto_submit' | 'tab_hidden' | 'tab_returned';
+  violationCount?: number;
 }) {
   const user = useAuthStore.getState().user;
+  const isAutoSubmit = payload.violationType === 'auto_submit';
+  const eventType = isAutoSubmit ? 'AUTO_SUBMIT_TRIGGERED' : 'VIOLATION_WARNING';
+  const status = isAutoSubmit ? 'failed' : 'warning';
+  const reason = isAutoSubmit
+    ? 'Maximum tab-switch violations reached; automatic exam submission triggered.'
+    : `Tab-switch detected (${payload.violationType}). Warning issued.`;
 
-  activityLog.logExam('EXAM_AUTO_SUBMITTED', {
+  activityLog.logExam(eventType, {
     userId: user?.id,
     studentName: user?.fullName,
     testId: payload.testId,
-    status: 'warning',
-    reason: `Violation event recorded: ${payload.violationType}`,
+    status,
+    reason,
   });
   void activityLog.flush();
 
+  // Update active_exam_sessions table so Admin Diagnostics sees the live warning state immediately
   try {
-    await insertRow('admin_activity_logs', {
-      user_id: user?.id ?? null,
-      student_name: user?.fullName ?? null,
-      category: 'exam',
-      event_type: payload.violationType === 'auto_submit' ? 'EXAM_AUTO_SUBMITTED' : 'VIOLATION_RECORDED',
-      status: 'warning',
-      device_info: Platform.OS === 'web' ? 'Web Browser' : Platform.OS,
-      details: { test_id: payload.testId, violation_type: payload.violationType },
-    });
+    if (user?.id) {
+      if (isAutoSubmit) {
+        await updateRows(
+          'active_exam_sessions',
+          {
+            status: 'AUTO_SUBMITTED',
+            last_active_at: new Date().toISOString(),
+          },
+          {
+            test_id: `eq.${payload.testId}`,
+            user_id: `eq.${user.id}`,
+          },
+        );
+      } else if (payload.violationCount) {
+        await updateRows(
+          'active_exam_sessions',
+          {
+            violations_count: payload.violationCount,
+            status: 'WARNING_TRIGGERED',
+            last_active_at: new Date().toISOString(),
+          },
+          {
+            test_id: `eq.${payload.testId}`,
+            user_id: `eq.${user.id}`,
+          },
+        );
+      }
+    }
   } catch {
-    // Best-effort database insertion
+    // Best-effort session update
   }
 
   try {
@@ -754,8 +776,51 @@ export async function logViolation(payload: {
   } catch {
     // Ignore edge function 404
   }
+}
 
-  return { success: true };
+export async function logExamLifecycleEvent(
+  eventType: 'TAB_RETURNED' | 'SUBMISSION_STARTED' | 'SUBMISSION_FAILED' | 'SUBMISSION_SUCCEEDED',
+  options: {
+    testId: string;
+    reason?: string;
+    score?: number;
+  },
+) {
+  const user = useAuthStore.getState().user;
+  const status =
+    eventType === 'SUBMISSION_FAILED'
+      ? 'failed'
+      : eventType === 'SUBMISSION_SUCCEEDED'
+        ? 'success'
+        : 'info';
+
+  activityLog.logExam(eventType, {
+    userId: user?.id,
+    studentName: user?.fullName,
+    testId: options.testId,
+    status,
+    reason: options.reason,
+    score: options.score,
+  });
+  void activityLog.flush();
+
+  try {
+    await insertRow('admin_activity_logs', {
+      user_id: user?.id ?? null,
+      student_name: user?.fullName ?? null,
+      category: 'exam',
+      event_type: eventType,
+      status,
+      device_info: Platform.OS === 'web' ? 'Web Browser' : Platform.OS,
+      details: {
+        test_id: options.testId,
+        reason: options.reason,
+        score: options.score,
+      },
+    });
+  } catch {
+    // Best-effort DB insert
+  }
 }
 
 export async function submitEnrollmentQuery(payload: EnrollmentQueryPayload) {
@@ -793,7 +858,6 @@ export async function fetchAttemptReview(resultId: string): Promise<TestAttemptR
     return localReviews;
   }
 
-  let rpcReviewItems: TestAttemptReviewItem[] = [];
   if (isUuid(resultId)) {
     try {
       const rows = await rpc<ReviewRow[]>(endpoints.tests.review, {
@@ -802,80 +866,12 @@ export async function fetchAttemptReview(resultId: string): Promise<TestAttemptR
         retryable: true,
       });
       if (rows && rows.length > 0) {
-        rpcReviewItems = rows.map(mapReviewRow);
+        return rows.map(mapReviewRow);
       }
-    } catch {
-      // Fall through to reconstruction
+    } catch (error) {
+      logWarn('fetchAttemptReview RPC denied or failed:', { error: String(error) });
+      throw error;
     }
-  }
-
-  if (rpcReviewItems.length > 0) {
-    return rpcReviewItems;
-  }
-
-  // Fallback: Reconstruct review items from attempt record answers and test questions
-  try {
-    const attempt = await fetchResultById(resultId);
-    if (attempt?.testId) {
-      let answersMap: Record<string, string> = {};
-      try {
-        const attemptRows = await selectRows<{ answers?: Record<string, string> }>('test_attempts', 'answers', { id: `eq.${resultId}` });
-        if (attemptRows && attemptRows[0]?.answers) {
-          answersMap = attemptRows[0].answers;
-        }
-      } catch {
-        // Ignore
-      }
-
-      const questions = await fetchQuestions(attempt.testId);
-      if (questions && questions.length > 0) {
-        const reconstructed: TestAttemptReviewItem[] = questions.map((q, idx) => {
-          const rawAnswer =
-            answersMap[q.id] ??
-            answersMap[`${attempt.testId}_draft_${idx + 1}`] ??
-            answersMap[`draft_${idx + 1}`] ??
-            '';
-          const userAns = typeof rawAnswer === 'string' ? rawAnswer.trim() : '';
-          const isUnatt = userAns === '';
-          const cleanCorrect = (q.correctAnswer || (q.integerAnswer !== undefined && q.integerAnswer !== null ? String(q.integerAnswer) : '')).trim();
-
-          const normUser = userAns.replace(/^Option\s+/i, '').trim().toLowerCase();
-          let normCorrect = cleanCorrect.replace(/^Option\s+/i, '').trim().toLowerCase();
-
-          if (q.options && Array.isArray(q.options) && /^[a-d]$/i.test(normUser)) {
-            const optIdx = normUser.toUpperCase().charCodeAt(0) - 65;
-            const optText = (q.options[optIdx] || '').trim().toLowerCase();
-            if (optText === normCorrect || normUser === normCorrect) {
-              normCorrect = normUser;
-            }
-          }
-
-          const isNumUser = !isNaN(Number(normUser)) && normUser.length > 0;
-          const isNumCorrect = !isNaN(Number(normCorrect)) && normCorrect.length > 0;
-          const isNumericMatch = isNumUser && isNumCorrect && Number(normUser) === Number(normCorrect);
-
-          const isCorrect = !isUnatt && (normUser === normCorrect || isNumericMatch);
-
-          return {
-            questionId: q.id,
-            testId: attempt.testId,
-            questionType: (q.type as any) || 'mcq',
-            prompt: q.prompt || `Question ${idx + 1}`,
-            options: q.options || ['A', 'B', 'C', 'D'],
-            userAnswer: userAns,
-            correctAnswer: cleanCorrect,
-            isCorrect,
-            isUnattempted: isUnatt,
-            explanation: q.explanation || `Correct Answer: ${cleanCorrect}`,
-            imageUrl: q.imageUrl,
-          };
-        });
-
-        return reconstructed;
-      }
-    }
-  } catch {
-    // Return empty
   }
 
   return [];
@@ -982,84 +978,6 @@ export async function fetchExistingAttemptForTest(testId: string, userId?: strin
   }
 
   return null;
-}
-
-async function splitPdfUrlInto3PageChunkUrls(pdfUrl: string): Promise<string[]> {
-  try {
-    const res = await fetch(pdfUrl);
-    if (!res.ok) return [pdfUrl];
-
-    const arrayBuffer = await res.arrayBuffer();
-    const srcDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
-    const totalPages = srcDoc.getPageCount();
-
-    if (totalPages <= 3) {
-      return [pdfUrl];
-    }
-
-    logInfo(`[PDF Auto-Batcher] Splitting ${totalPages}-page PDF into 3-page chunks...`);
-    const chunkUrls: string[] = [];
-
-    for (let start = 0; start < totalPages; start += 3) {
-      const end = Math.min(start + 3, totalPages);
-      const subDoc = await PDFDocument.create();
-      const pageIndices = Array.from({ length: end - start }, (_, i) => start + i);
-      const copiedPages = await subDoc.copyPages(srcDoc, pageIndices);
-      copiedPages.forEach((page) => subDoc.addPage(page));
-      const subBytes = await subDoc.save();
-
-      const blob = new globalThis.Blob([subBytes.buffer as ArrayBuffer], { type: 'application/pdf' });
-
-      const uploaded = await uploadExamAsset({
-        uri: '',
-        file: blob as any,
-        name: `chunk_${start + 1}_to_${end}.pdf`,
-        mimeType: 'application/pdf',
-        folder: 'pdfs',
-      });
-      chunkUrls.push(uploaded.publicUrl);
-    }
-
-    return chunkUrls;
-  } catch (error) {
-    logWarn('[PDF Auto-Batcher] Client-side splitting error, falling back to direct URL:', { error: String(error) });
-    return [pdfUrl];
-  }
-}
-
-export async function importQuestionsFromPdf(payload: PdfImportPayload & { provider?: 'openai' | 'gemini' }) {
-  console.log('[PDF-IMPORT-DEBUG] Starting Visual-First PDF Extraction Pipeline for:', payload.pdfUrl);
-
-  const visualResult = await processVisualPdfImport({
-    pdfUrl: payload.pdfUrl,
-    pdfName: payload.testTitle || 'Questions PDF',
-    answerKeyPdfUrl: payload.answerKeyPdfUrl,
-  });
-
-  const pdfImportQuestions = visualResult.questions.map((q: any) => ({
-    type: q.type as any,
-    question: q.prompt || q.question,
-    options: q.options,
-    correctAnswer: q.correct_answer || q.correctAnswer || '',
-    explanation: q.explanation || '',
-    image: q.image_url || q.imageUrl || null,
-    has_image: Boolean(q.has_diagram || q.image_url || q.imageUrl),
-    question_number: q.question_number,
-  }));
-
-  const draftQuestions = pdfImportQuestions.map(mapPdfImportQuestion);
-
-  if (draftQuestions.length === 0) {
-    throw new Error('No usable questions could be parsed from the uploaded PDF. Please verify that the PDF contains readable text/questions.');
-  }
-
-  return {
-    questions: pdfImportQuestions,
-    draftQuestions,
-    warnings: [],
-    totalPages: 24,
-    batchCount: 8,
-  };
 }
 
 export async function resolveExamLink(shareCode: string, userId?: string): Promise<ExamLinkResolution> {

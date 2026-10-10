@@ -1,5 +1,5 @@
 import React, { useCallback, useDeferredValue, useMemo, useState } from 'react';
-import { Alert, FlatList, ListRenderItem, StyleSheet, Text, View } from 'react-native';
+import { Alert, FlatList, ListRenderItem, Platform, StyleSheet, Text, View } from 'react-native';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useFocusEffect } from '@react-navigation/native';
 import { PencilLine, Play, Share2, ShieldAlert, Trash2 } from 'lucide-react-native';
@@ -103,6 +103,8 @@ export function ManageTestsScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const isAdmin = user?.role === 'admin' && user.approvalStatus === 'approved';
   const deferredSearchTerm = useDeferredValue(searchTerm);
+  const [isSaving, setIsSaving] = useState(false);
+  const [startingTestId, setStartingTestId] = useState<string | null>(null);
 
   const testsRef = React.useRef<TestItem[]>([]);
   testsRef.current = tests;
@@ -203,7 +205,7 @@ export function ManageTestsScreen() {
   }, []);
 
   const handleSave = useCallback(async () => {
-    if (!editingTestId || !draft) {
+    if (!editingTestId || !draft || isSaving) {
       return;
     }
 
@@ -215,6 +217,7 @@ export function ManageTestsScreen() {
     const isWeeklyOpen = draft.isOpenForAll || !draft.batchId;
 
     try {
+      setIsSaving(true);
       const scheduledAt = combineScheduleInputs(draft.scheduleDate, draft.scheduleTime);
       const updated = await updateTest({
         testId: editingTestId,
@@ -234,25 +237,32 @@ export function ManageTestsScreen() {
       handleCancelEdit();
     } catch (error) {
       Alert.alert('Update failed', error instanceof Error ? error.message : 'Unable to update this paper.');
+    } finally {
+      setIsSaving(false);
     }
-  }, [draft, editingTestId, handleCancelEdit, updateTest]);
+  }, [draft, editingTestId, handleCancelEdit, isSaving, updateTest]);
 
   const handleStartEarly = useCallback(
     async (test: TestItem) => {
+      if (startingTestId) return;
+
       if (isTestActive(test)) {
         Alert.alert('Paper already active', 'This paper is already live for students.');
         return;
       }
 
       try {
+        setStartingTestId(test.id);
         const updated = await setTestStarted(test.id, true);
         setTests((current) => current.map((item) => (item.id === updated.id ? updated : item)));
         Alert.alert('Paper started', 'Students can now enter this paper before the scheduled time.');
       } catch (error) {
         Alert.alert('Status update failed', error instanceof Error ? error.message : 'Unable to change paper status.');
+      } finally {
+        setStartingTestId(null);
       }
     },
-    [setTestStarted],
+    [setTestStarted, startingTestId],
   );
 
   const handleDelete = useCallback(
@@ -353,9 +363,12 @@ export function ManageTestsScreen() {
               <Text style={styles.secondaryButtonText}>Edit</Text>
             </AnimatedPressable>
             {!testActive ? (
-              <AnimatedPressable style={[styles.statusButton, styles.startButton]} onPress={() => void handleStartEarly(test)}>
+              <AnimatedPressable
+                style={[styles.statusButton, styles.startButton, startingTestId === test.id && { opacity: 0.6 }]}
+                disabled={startingTestId === test.id}
+                onPress={() => void handleStartEarly(test)}>
                 <Play size={16} color={colors.white} />
-                <Text style={styles.statusButtonText}>Start</Text>
+                <Text style={styles.statusButtonText}>{startingTestId === test.id ? 'Starting...' : 'Start'}</Text>
               </AnimatedPressable>
             ) : null}
             <AnimatedPressable style={styles.deleteButton} onPress={() => handleDelete(test)}>
@@ -426,19 +439,83 @@ export function ManageTestsScreen() {
               <View style={styles.twoColumnRow}>
                 <View style={styles.flexItem}>
                   <Text style={styles.sectionLabel}>Start Date</Text>
-                  <AnimatedPressable style={styles.pickerField} onPress={() => setIsDatePickerVisible(true)}>
-                    <Text style={styles.pickerValue}>{formatDateLabel(combineScheduleInputs(draft.scheduleDate, draft.scheduleTime))}</Text>
-                  </AnimatedPressable>
+                  {Platform.OS === 'web' ? (
+                    <View style={styles.pickerField}>
+                      {React.createElement('input', {
+                        type: 'date',
+                        value: draft.scheduleDate,
+                        onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+                          if (e?.target?.value) {
+                            setDraft((current) => (current ? { ...current, scheduleDate: e.target.value } : current));
+                          }
+                        },
+                        onClick: (e: React.MouseEvent<HTMLInputElement>) => {
+                          try {
+                            (e.target as HTMLInputElement).showPicker?.();
+                          } catch {}
+                        },
+                        style: {
+                          width: '100%',
+                          height: '100%',
+                          minHeight: 52,
+                          border: 'none',
+                          outline: 'none',
+                          background: 'transparent',
+                          color: colors.text,
+                          fontSize: 15,
+                          fontWeight: '600',
+                          fontFamily: 'inherit',
+                          cursor: 'pointer',
+                        },
+                      })}
+                    </View>
+                  ) : (
+                    <AnimatedPressable style={styles.pickerField} onPress={() => setIsDatePickerVisible(true)}>
+                      <Text style={styles.pickerValue}>{formatDateLabel(combineScheduleInputs(draft.scheduleDate, draft.scheduleTime))}</Text>
+                    </AnimatedPressable>
+                  )}
                 </View>
                 <View style={styles.flexItem}>
                   <Text style={styles.sectionLabel}>Start Time</Text>
-                  <AnimatedPressable style={styles.pickerField} onPress={() => setIsTimePickerVisible(true)}>
-                    <Text style={styles.pickerValue}>{draft.scheduleTime}</Text>
-                  </AnimatedPressable>
+                  {Platform.OS === 'web' ? (
+                    <View style={styles.pickerField}>
+                      {React.createElement('input', {
+                        type: 'time',
+                        value: draft.scheduleTime,
+                        onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+                          if (e?.target?.value) {
+                            setDraft((current) => (current ? { ...current, scheduleTime: e.target.value } : current));
+                          }
+                        },
+                        onClick: (e: React.MouseEvent<HTMLInputElement>) => {
+                          try {
+                            (e.target as HTMLInputElement).showPicker?.();
+                          } catch {}
+                        },
+                        style: {
+                          width: '100%',
+                          height: '100%',
+                          minHeight: 52,
+                          border: 'none',
+                          outline: 'none',
+                          background: 'transparent',
+                          color: colors.text,
+                          fontSize: 15,
+                          fontWeight: '600',
+                          fontFamily: 'inherit',
+                          cursor: 'pointer',
+                        },
+                      })}
+                    </View>
+                  ) : (
+                    <AnimatedPressable style={styles.pickerField} onPress={() => setIsTimePickerVisible(true)}>
+                      <Text style={styles.pickerValue}>{draft.scheduleTime}</Text>
+                    </AnimatedPressable>
+                  )}
                 </View>
               </View>
 
-              {isDatePickerVisible ? (
+              {Platform.OS !== 'web' && isDatePickerVisible ? (
                 <DateTimePicker
                   mode="date"
                   value={buildSchedulePickerDate(draft.scheduleDate, draft.scheduleTime)}
@@ -446,7 +523,7 @@ export function ManageTestsScreen() {
                 />
               ) : null}
 
-              {isTimePickerVisible ? (
+              {Platform.OS !== 'web' && isTimePickerVisible ? (
                 <DateTimePicker
                   mode="time"
                   value={buildSchedulePickerDate(draft.scheduleDate, draft.scheduleTime)}
@@ -510,8 +587,11 @@ export function ManageTestsScreen() {
                 <AnimatedPressable style={styles.secondaryButton} onPress={handleCancelEdit}>
                   <Text style={styles.secondaryButtonText}>Cancel</Text>
                 </AnimatedPressable>
-                <AnimatedPressable style={styles.saveButton} onPress={() => void handleSave()}>
-                  <Text style={styles.saveButtonText}>Save Changes</Text>
+                <AnimatedPressable
+                  style={[styles.saveButton, isSaving && { opacity: 0.6 }]}
+                  disabled={isSaving}
+                  onPress={() => void handleSave()}>
+                  <Text style={styles.saveButtonText}>{isSaving ? 'Saving Changes...' : 'Save Changes'}</Text>
                 </AnimatedPressable>
               </View>
             </View>

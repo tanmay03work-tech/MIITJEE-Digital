@@ -5,10 +5,12 @@ import { WifiOff } from 'lucide-react-native';
 
 import { colors, radius, spacing, typography } from '../../theme';
 import { useConnectivityStore } from '../../store/connectivityStore';
+import { useTestSessionStore } from '../../store/testSessionStore';
 
 export function GlobalOfflineOverlay() {
   const isOffline = useConnectivityStore((state) => state.isOffline);
   const setOffline = useConnectivityStore((state) => state.setOffline);
+  const isExamActive = useTestSessionStore((state) => Boolean(state.test && state.questions.length > 0));
 
   useEffect(() => {
     const applyState = (isConnected: boolean | null, isInternetReachable: boolean | null) => {
@@ -31,6 +33,19 @@ export function GlobalOfflineOverlay() {
 
   if (!isOffline) {
     return null;
+  }
+
+  if (isExamActive) {
+    return (
+      <View style={styles.examBanner} pointerEvents="box-none">
+        <View style={styles.examBannerCard}>
+          <WifiOff size={16} color={colors.warning} />
+          <Text style={styles.examBannerText}>
+            Offline: Exam continues uninterrupted. Answers are saved locally.
+          </Text>
+        </View>
+      </View>
+    );
   }
 
   return (
@@ -107,5 +122,34 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: 14,
     fontWeight: '800',
+  },
+  examBanner: {
+    position: 'absolute',
+    top: 48,
+    left: 16,
+    right: 16,
+    zIndex: 9999,
+  },
+  examBannerCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: '#1E293B',
+    borderColor: colors.warning,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  examBannerText: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: '600',
   },
 });

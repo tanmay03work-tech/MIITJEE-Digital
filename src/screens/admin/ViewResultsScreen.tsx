@@ -342,6 +342,11 @@ export function ViewResultsScreen() {
     void loadResultsPage(false, deferredSearchTerm);
   }, [deferredSearchTerm, hasMore, loadResultsPage, loadingInitial, loadingMore]);
 
+  const testOptions = useMemo(() => {
+    const list = tests.map((t) => ({ label: t.title, value: t.id, description: `${t.subject} | ${t.questionCount} Qs` }));
+    return [{ label: 'All Exams / Tests', value: 'all', description: 'Show results across all exams' }, ...list];
+  }, [tests]);
+
   if (!isAdmin) {
     return (
       <Screen>
@@ -356,11 +361,6 @@ export function ViewResultsScreen() {
       </Screen>
     );
   }
-
-  const testOptions = useMemo(() => {
-    const list = tests.map((t) => ({ label: t.title, value: t.id, description: `${t.subject} | ${t.questionCount} Qs` }));
-    return [{ label: 'All Exams / Tests', value: 'all', description: 'Show results across all exams' }, ...list];
-  }, [tests]);
 
   return (
     <Screen useScrollView={false}>

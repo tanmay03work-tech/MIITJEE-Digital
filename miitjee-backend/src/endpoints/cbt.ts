@@ -38,23 +38,24 @@ async function supabaseFetch(env: Env, path: string, method = 'GET', body?: unkn
 }
 
 // 1. Device Registration & Single Device Binding Handler
-export async function registerDeviceHandler(req: Request, env: Env): Promise<Response> {
+export async function registerDeviceHandler(req: Request, env: Env, authenticatedUserId?: string): Promise<Response> {
   try {
     const body = await req.json() as {
-      user_id: string;
+      user_id?: string;
       device_fingerprint: string;
       device_name?: string;
       os_version?: string;
     };
 
-    if (!body.user_id || !body.device_fingerprint) {
+    const targetUserId = authenticatedUserId || body.user_id;
+    if (!targetUserId || !body.device_fingerprint) {
       return Response.json({ error: 'user_id and device_fingerprint are required' }, { status: 400 });
     }
 
     // Check existing bound device for student
     const checkRes = await supabaseFetch(
       env,
-      `/student_devices?user_id=eq.${body.user_id}&is_active=eq.true`
+      `/student_devices?user_id=eq.${targetUserId}&is_active=eq.true`
     );
 
     const existingDevices = Array.isArray(checkRes.data) ? checkRes.data : [];
@@ -84,7 +85,7 @@ export async function registerDeviceHandler(req: Request, env: Env): Promise<Res
       '/student_devices',
       'POST',
       {
-        user_id: body.user_id,
+        user_id: targetUserId,
         device_fingerprint: body.device_fingerprint,
         device_name: body.device_name || 'Windows Desktop',
         os_version: body.os_version || 'Windows 10/11',
@@ -104,23 +105,24 @@ export async function registerDeviceHandler(req: Request, env: Env): Promise<Res
 }
 
 // 2. Start / Resume CBT Exam Session Handler
-export async function startCbtSessionHandler(req: Request, env: Env): Promise<Response> {
+export async function startCbtSessionHandler(req: Request, env: Env, authenticatedUserId?: string): Promise<Response> {
   try {
     const body = await req.json() as {
-      user_id: string;
+      user_id?: string;
       test_id: string;
       device_fingerprint: string;
       duration_minutes: number;
     };
 
-    if (!body.user_id || !body.test_id || !body.device_fingerprint) {
+    const targetUserId = authenticatedUserId || body.user_id;
+    if (!targetUserId || !body.test_id || !body.device_fingerprint) {
       return Response.json({ error: 'user_id, test_id, and device_fingerprint required' }, { status: 400 });
     }
 
     // Verify Device Binding First
     const deviceRes = await supabaseFetch(
       env,
-      `/student_devices?user_id=eq.${body.user_id}&device_fingerprint=eq.${body.device_fingerprint}&is_active=eq.true`
+      `/student_devices?user_id=eq.${targetUserId}&device_fingerprint=eq.${body.device_fingerprint}&is_active=eq.true`
     );
     const devices = Array.isArray(deviceRes.data) ? deviceRes.data : [];
     if (devices.length === 0) {
@@ -130,7 +132,7 @@ export async function startCbtSessionHandler(req: Request, env: Env): Promise<Re
     // Check existing active session
     const sessionRes = await supabaseFetch(
       env,
-      `/cbt_exam_sessions?user_id=eq.${body.user_id}&test_id=eq.${body.test_id}`
+      `/cbt_exam_sessions?user_id=eq.${targetUserId}&test_id=eq.${body.test_id}`
     );
     const sessions = Array.isArray(sessionRes.data) ? sessionRes.data : [];
 
@@ -149,7 +151,7 @@ export async function startCbtSessionHandler(req: Request, env: Env): Promise<Re
     const duration = body.duration_minutes || 180;
     const newSession = {
       test_id: body.test_id,
-      user_id: body.user_id,
+      user_id: targetUserId,
       device_fingerprint: body.device_fingerprint,
       status: 'IN_PROGRESS',
       duration_minutes: duration,
@@ -170,11 +172,11 @@ export async function startCbtSessionHandler(req: Request, env: Env): Promise<Re
 }
 
 // 3. Batched 10-Second Queue Sync Handler
-export async function syncBatchHandler(req: Request, env: Env): Promise<Response> {
+export async function syncBatchHandler(req: Request, env: Env, authenticatedUserId?: string): Promise<Response> {
   try {
     const body = await req.json() as {
       session_id: string;
-      user_id: string;
+      user_id?: string;
       test_id: string;
       version_id: number;
       time_remaining_seconds: number;
@@ -182,14 +184,15 @@ export async function syncBatchHandler(req: Request, env: Env): Promise<Response
       client_timestamp: string;
     };
 
-    if (!body.session_id || !body.answers_json) {
-      return Response.json({ error: 'session_id and answers_json required' }, { status: 400 });
+    const targetUserId = authenticatedUserId || body.user_id;
+    if (!body.session_id || !body.answers_json || !targetUserId) {
+      return Response.json({ error: 'session_id, user_id, and answers_json required' }, { status: 400 });
     }
 
     // Save snapshot delta
     const snapshotPayload = {
       session_id: body.session_id,
-      user_id: body.user_id,
+      user_id: targetUserId,
       test_id: body.test_id,
       snapshot_type: 'DELTA_10S',
       answers_json: body.answers_json,
@@ -222,22 +225,23 @@ export async function syncBatchHandler(req: Request, env: Env): Promise<Response
 }
 
 // 4. CBT Security Audit Event Logger
-export async function auditLogHandler(req: Request, env: Env): Promise<Response> {
+export async function auditLogHandler(req: Request, env: Env, authenticatedUserId?: string): Promise<Response> {
   try {
     const body = await req.json() as {
       session_id?: string;
-      user_id: string;
+      user_id?: string;
       event_type: string;
       details_json?: Record<string, unknown>;
     };
 
-    if (!body.user_id || !body.event_type) {
+    const targetUserId = authenticatedUserId || body.user_id;
+    if (!targetUserId || !body.event_type) {
       return Response.json({ error: 'user_id and event_type required' }, { status: 400 });
     }
 
     await supabaseFetch(env, '/cbt_audit_logs', 'POST', {
       session_id: body.session_id || null,
-      user_id: body.user_id,
+      user_id: targetUserId,
       event_type: body.event_type,
       details_json: body.details_json || {}
     });

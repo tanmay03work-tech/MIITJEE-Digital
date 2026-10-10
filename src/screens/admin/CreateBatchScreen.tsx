@@ -4,6 +4,7 @@ import { FileImage, ShieldAlert, Trash2 } from 'lucide-react-native';
 
 import { AppHeader } from '../../components/common/AppHeader';
 import { AnimatedPressable } from '../../components/common/AnimatedPressable';
+import { Button } from '../../components/common/Button';
 import { EmptyState } from '../../components/common/EmptyState';
 import { InputField } from '../../components/common/InputField';
 import { Screen } from '../../components/common/Screen';
@@ -27,6 +28,8 @@ export function CreateBatchScreen({ navigation }: RootStackScreenProps<'CreateBa
   const [description, setDescription] = useState('');
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const [errors, setErrors] = useState<{ name?: string; targetExam?: string; classLabel?: string; description?: string }>({});
 
   const handleImageUpload = async () => {
     try {
@@ -58,12 +61,23 @@ export function CreateBatchScreen({ navigation }: RootStackScreenProps<'CreateBa
   };
 
   const handleCreateBatch = async () => {
-    if (!name.trim() || !targetExam.trim() || !classLabel.trim() || !description.trim()) {
-      Alert.alert('Batch details missing', 'Add the name, target exam, class, and description before creating the batch.');
+    if (isCreating) return;
+
+    const newErrors: { name?: string; targetExam?: string; classLabel?: string; description?: string } = {};
+    if (!name.trim()) newErrors.name = 'Batch name is required';
+    if (!targetExam.trim()) newErrors.targetExam = 'Target exam is required';
+    if (!classLabel.trim()) newErrors.classLabel = 'Class label is required';
+    if (!description.trim()) newErrors.description = 'Batch description is required';
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      Alert.alert('Missing Details', 'Please complete the highlighted required fields.');
       return;
     }
+    setErrors({});
 
     try {
+      setIsCreating(true);
       await createBatch({
         label: name.trim(),
         targetExam: targetExam.trim(),
@@ -72,10 +86,12 @@ export function CreateBatchScreen({ navigation }: RootStackScreenProps<'CreateBa
         imageUrl,
       });
 
-      Alert.alert('Batch created', 'This batch is now visible across the app for all learners.');
+      Alert.alert('Batch Created', 'This batch is now visible across the app for all learners.');
       navigation.goBack();
     } catch (error) {
       Alert.alert('Unable to create batch', error instanceof Error ? error.message : 'Please try again in a moment.');
+    } finally {
+      setIsCreating(false);
     }
   };
 
@@ -100,13 +116,43 @@ export function CreateBatchScreen({ navigation }: RootStackScreenProps<'CreateBa
 
       <View style={styles.list}>
         <View style={styles.formCard}>
-          <InputField label="Batch Name" placeholder="JEE 2027 Evening" value={name} onChangeText={setName} />
+          <InputField
+            label="Batch Name"
+            placeholder="JEE 2027 Evening"
+            value={name}
+            onChangeText={(val) => {
+              setName(val);
+              if (errors.name) setErrors((prev) => ({ ...prev, name: undefined }));
+            }}
+            error={errors.name}
+            required
+          />
           <View style={styles.row}>
             <View style={styles.flexItem}>
-              <InputField label="Target Exam" placeholder="JEE Advanced" value={targetExam} onChangeText={setTargetExam} />
+              <InputField
+                label="Target Exam"
+                placeholder="JEE Advanced"
+                value={targetExam}
+                onChangeText={(val) => {
+                  setTargetExam(val);
+                  if (errors.targetExam) setErrors((prev) => ({ ...prev, targetExam: undefined }));
+                }}
+                error={errors.targetExam}
+                required
+              />
             </View>
             <View style={styles.flexItem}>
-              <InputField label="Class" placeholder="Class 12" value={classLabel} onChangeText={setClassLabel} />
+              <InputField
+                label="Class"
+                placeholder="Class 12"
+                value={classLabel}
+                onChangeText={(val) => {
+                  setClassLabel(val);
+                  if (errors.classLabel) setErrors((prev) => ({ ...prev, classLabel: undefined }));
+                }}
+                error={errors.classLabel}
+                required
+              />
             </View>
           </View>
           <InputField
@@ -114,7 +160,12 @@ export function CreateBatchScreen({ navigation }: RootStackScreenProps<'CreateBa
             placeholder="Describe the preparation style, schedule, and who this batch is for"
             multiline
             value={description}
-            onChangeText={setDescription}
+            onChangeText={(val) => {
+              setDescription(val);
+              if (errors.description) setErrors((prev) => ({ ...prev, description: undefined }));
+            }}
+            error={errors.description}
+            required
             style={styles.descriptionInput}
           />
 
@@ -130,9 +181,14 @@ export function CreateBatchScreen({ navigation }: RootStackScreenProps<'CreateBa
             </View>
           ) : null}
 
-          <AnimatedPressable style={styles.primaryButton} onPress={() => void handleCreateBatch()}>
-            <Text style={styles.primaryButtonText}>Create Batch</Text>
-          </AnimatedPressable>
+          <Button
+            label="Create Batch"
+            loadingLabel="Creating Batch..."
+            loading={isCreating}
+            onPress={() => void handleCreateBatch()}
+            size="lg"
+            fullWidth
+          />
         </View>
 
         <View style={styles.formCard}>

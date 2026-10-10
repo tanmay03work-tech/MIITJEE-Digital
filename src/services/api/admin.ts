@@ -301,7 +301,7 @@ export async function createTest(payload: CreateTestPayload): Promise<TestItem> 
   // Use a known existing batch (e.g. ELEVATOR or specified batch) for the initial create RPC, then decouple batch via update_test_details if Open for All
   const initialBatchId = (!isOpenForAll && rawBatchId && rawBatchId !== 'ALL') ? rawBatchId : 'ELEVATOR';
 
-  // 1. Invoke create_test_with_questions (SECURITY DEFINER) with 10-parameter signature
+  // 1. Invoke create_test_with_questions (SECURITY DEFINER)
   const row = await rpc<TestRow>(endpoints.admin.createTest, {
     p_title: payload.title,
     p_description: payload.description,
@@ -313,6 +313,7 @@ export async function createTest(payload: CreateTestPayload): Promise<TestItem> 
     p_scholarship_target_exam: payload.scholarshipTargetExam ?? null,
     p_questions: payload.questions,
     p_scheduled_at: payload.scheduledAt,
+    p_is_open_for_all: isOpenForAll,
   });
 
   // 2. If Open for All, update the test details to clear batch_id and set is_open_for_all: true
@@ -650,6 +651,7 @@ export async function fetchQuestionSetQuestions(setId: number): Promise<Question
     type: 'mcq' | 'integer';
     image_url: string | null;
     correct_answer: string;
+    position?: number | null;
   };
 
   let rows: QuestionRow[] = [];
@@ -658,15 +660,27 @@ export async function fetchQuestionSetQuestions(setId: number): Promise<Question
   try {
     rows = await selectRows<QuestionRow>(
       'questions',
-      'id,question,options,type,image_url,correct_answer',
+      'id,question,options,type,image_url,correct_answer,position',
       {
         set_id: `eq.${setId}`,
-        order: 'id.asc',
+        order: 'position.asc,id.asc',
         limit: 1000,
       },
     );
   } catch (err) {
-    fetchError = err instanceof Error ? err : new Error(String(err));
+    try {
+      rows = await selectRows<QuestionRow>(
+        'questions',
+        'id,question,options,type,image_url,correct_answer',
+        {
+          set_id: `eq.${setId}`,
+          order: 'id.asc',
+          limit: 1000,
+        },
+      );
+    } catch (fallbackErr) {
+      fetchError = fallbackErr instanceof Error ? fallbackErr : new Error(String(fallbackErr));
+    }
   }
 
   if (!rows || rows.length === 0) {
@@ -679,17 +693,41 @@ export async function fetchQuestionSetQuestions(setId: number): Promise<Question
     }
   }
 
-  const sortedRows = [...(rows || [])].sort((a, b) => Number(a.id) - Number(b.id));
+  const sortedRows = [...(rows || [])].sort((a, b) => {
+    const posA = typeof a.position === 'number' && a.position > 0 ? a.position : Number(a.id);
+    const posB = typeof b.position === 'number' && b.position > 0 ? b.position : Number(b.id);
+    if (posA !== posB) return posA - posB;
+    return Number(a.id) - Number(b.id);
+  });
 
   return sortedRows.map((row) => ({
     id: Number(row.id),
     setId,
+    position: typeof row.position === 'number' ? row.position : undefined,
     question: row.question,
     options: Array.isArray(row.options) ? row.options : typeof row.options === 'string' ? JSON.parse(row.options) : [],
     type: row.type,
     imageUrl: normalizeAssetUrl(row.image_url),
     correctAnswer: row.correct_answer,
   }));
+}
+
+export async function reorderQuestionSet(setId: number, questionIds: number[]): Promise<{ success: boolean; set_id: number; updated_count?: number }> {
+  try {
+    const res = await rpc<{ success: boolean; set_id: number; updated_count?: number }>('reorder_question_set', {
+      p_set_id: setId,
+      p_question_ids: questionIds,
+    });
+    invalidateAdminCache();
+    return res;
+  } catch (err) {
+    console.warn('[reorderQuestionSet] RPC call failed, falling back to batch updateRows:', err);
+    for (let i = 0; i < questionIds.length; i++) {
+      await updateRows('questions', { position: i + 1 }, { id: `eq.${questionIds[i]}`, set_id: `eq.${setId}` });
+    }
+    invalidateAdminCache();
+    return { success: true, set_id: setId, updated_count: questionIds.length };
+  }
 }
 
 export async function createQuestionSet(payload: {
@@ -747,8 +785,9 @@ export async function createQuestionSet(payload: {
       question_count: payload.questions.length,
     };
 
-    const qRows = payload.questions.map((q) => ({
+    const qRows = payload.questions.map((q, idx) => ({
       set_id: setRow.set_id,
+      position: idx + 1,
       question: q.question || '',
       options: q.options || [],
       correct_answer: q.correct_answer || '',
@@ -882,4 +921,124 @@ export async function deleteQuestionSet(setId: number) {
   await deleteRows('question_sets', { set_id: `eq.${setId}` });
   invalidateAdminCache();
   return { success: true, set_id: setId };
+}
+
+export interface AdminDiagnosticSession {
+  sessionId: string;
+  testId: string;
+  testTitle: string;
+  userId: string;
+  studentName: string;
+  batchId?: string;
+  status: string;
+  currentQuestionIndex: number;
+  attemptedCount: number;
+  unattemptedCount: number;
+  flaggedCount: number;
+  violationsCount: number;
+  timeExtendedMinutes: number;
+  deviceInfo?: string;
+  lastActiveAt: string;
+  issueCode: string;
+  issueReason: string;
+  suggestedAction: string;
+}
+
+export async function fetchAdminDiagnostics(testId?: string): Promise<AdminDiagnosticSession[]> {
+  try {
+    const rows = await rpc<Array<{
+      session_id: string;
+      test_id: string;
+      test_title: string;
+      user_id: string;
+      student_name: string;
+      batch_id: string | null;
+      status: string;
+      current_question_index: number;
+      attempted_count: number;
+      unattempted_count: number;
+      flagged_count: number;
+      violations_count: number;
+      time_extended_minutes: number;
+      device_info: string | null;
+      last_active_at: string;
+      issue_code: string;
+      issue_reason: string;
+      suggested_action: string;
+    }>>('admin_get_diagnostics_sessions', {
+      p_test_id: testId || null,
+    });
+
+    return (rows || []).map((row) => ({
+      sessionId: row.session_id,
+      testId: row.test_id,
+      testTitle: row.test_title,
+      userId: row.user_id,
+      studentName: row.student_name,
+      batchId: row.batch_id || undefined,
+      status: row.status,
+      currentQuestionIndex: row.current_question_index ?? 0,
+      attemptedCount: row.attempted_count ?? 0,
+      unattemptedCount: row.unattempted_count ?? 0,
+      flaggedCount: row.flagged_count ?? 0,
+      violationsCount: row.violations_count ?? 0,
+      timeExtendedMinutes: row.time_extended_minutes ?? 0,
+      deviceInfo: row.device_info || undefined,
+      lastActiveAt: row.last_active_at,
+      issueCode: row.issue_code,
+      issueReason: row.issue_reason,
+      suggestedAction: row.suggested_action,
+    }));
+  } catch (rpcError) {
+    // Fallback: query active_exam_sessions directly if RPC not yet migrated
+    const sessions = await selectRows<any>('active_exam_sessions', '*');
+    if (!sessions || sessions.length === 0) return [];
+
+    return sessions
+      .filter((s: any) => !testId || s.test_id === testId)
+      .map((s: any) => ({
+        sessionId: s.id,
+        testId: s.test_id,
+        testTitle: s.test_title || 'Active Examination',
+        userId: s.user_id,
+        studentName: s.student_name || 'Student',
+        batchId: s.batch_id,
+        status: s.status || 'IN_PROGRESS',
+        currentQuestionIndex: s.current_question_index ?? 0,
+        attemptedCount: s.attempted_count ?? 0,
+        unattemptedCount: s.unattempted_count ?? 0,
+        flaggedCount: s.flagged_count ?? 0,
+        violationsCount: s.violations_count ?? 0,
+        timeExtendedMinutes: s.time_extended_minutes ?? 0,
+        deviceInfo: s.device_info,
+        lastActiveAt: s.last_active_at || new Date().toISOString(),
+        issueCode: s.violations_count >= 3 ? 'MAX_TAB_VIOLATIONS' : s.status || 'ACTIVE_MONITORING',
+        issueReason: s.violations_count >= 3
+          ? 'Student reached maximum tab-switch violation limit.'
+          : `Session status: ${s.status || 'IN_PROGRESS'}.`,
+        suggestedAction: s.violations_count >= 3 ? 'Reset warnings or force submit.' : 'Session active.',
+      }));
+  }
+}
+
+export async function adminForceSubmitSession(sessionId: string): Promise<boolean> {
+  const result = await rpc<boolean>('admin_force_submit_session', {
+    p_session_id: sessionId,
+  });
+  return Boolean(result);
+}
+
+export async function adminExtendSessionTime(sessionId: string, minutes = 15): Promise<boolean> {
+  const result = await rpc<boolean>('admin_extend_session_time', {
+    p_session_id: sessionId,
+    p_minutes: minutes,
+  });
+  return Boolean(result);
+}
+
+export async function adminResetSessionWarnings(sessionId: string): Promise<boolean> {
+  const result = await rpc<boolean>('admin_reset_session_warnings', {
+    p_session_id: sessionId,
+  });
+  return Boolean(result);
 }

@@ -5,7 +5,7 @@ import Animated, { FadeIn, useAnimatedStyle, useSharedValue, withSpring } from '
 
 import { AnimatedPressable } from '../common/AnimatedPressable';
 import { colors, radius, spacing } from '../../theme';
-import { formatExamTextForDisplay } from '../../utils/examText';
+import { FormattedExamText } from '../common/FormattedExamText';
 
 interface OptionCardProps {
   badgeLabel: string;
@@ -17,7 +17,6 @@ interface OptionCardProps {
 
 function OptionCardComponent({ badgeLabel, label, selected, onPress, imageUrl }: OptionCardProps) {
   const selectedScale = useSharedValue(selected ? 1.01 : 1);
-  const displayLabel = useMemo(() => formatExamTextForDisplay(label), [label]);
 
   useEffect(() => {
     selectedScale.value = withSpring(selected ? 1.01 : 1, {
@@ -36,7 +35,7 @@ function OptionCardComponent({ badgeLabel, label, selected, onPress, imageUrl }:
         <Text style={[styles.pillText, selected && styles.pillTextSelected]}>{badgeLabel}</Text>
       </View>
       <View style={styles.contentWrap}>
-        <Text style={[styles.text, selected && styles.textSelected]}>{displayLabel}</Text>
+        <FormattedExamText text={label} style={[styles.text, selected && styles.textSelected]} />
         {imageUrl ? (
           <Image source={{ uri: imageUrl }} style={styles.optionImage} resizeMode="contain" />
         ) : null}

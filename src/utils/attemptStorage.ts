@@ -8,8 +8,12 @@ export interface ExamAttemptSnapshot {
   answers: Record<string, string>;
   flaggedQuestionIds: string[];
   secondsRemaining: number;
+  startedAt?: string;
+  expiresAt?: string;
+  studentName?: string;
   savedAt: string;
   isPendingSync: boolean;
+  submissionState?: 'IN_PROGRESS' | 'TIME_EXPIRED' | 'SUBMITTING' | 'RETRY_PENDING' | 'SUBMITTED';
 }
 
 export async function saveAttemptSnapshot(snapshot: Omit<ExamAttemptSnapshot, 'savedAt'>): Promise<void> {

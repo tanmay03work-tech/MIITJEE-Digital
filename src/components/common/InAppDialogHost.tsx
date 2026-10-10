@@ -1,5 +1,5 @@
 import React from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { colors, radius, spacing } from '../../theme';
 import { useUIStore } from '../../store/uiStore';
@@ -21,6 +21,8 @@ export function InAppDialogHost() {
     }
   };
 
+  const isTwoButtons = dialog.buttons.length === 2;
+
   return (
     <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={hideDialog}>
       <View style={styles.overlay}>
@@ -36,26 +38,33 @@ export function InAppDialogHost() {
           <Text style={styles.title}>{dialog.title}</Text>
           {dialog.message ? <Text style={styles.message}>{dialog.message}</Text> : null}
 
-          <View style={styles.actions}>
-            {dialog.buttons.map((button, index) => (
-              <Pressable
-                key={`${button.text}_${index}`}
-                style={[
-                  styles.button,
-                  button.style === 'cancel' && styles.buttonSecondary,
-                  button.style === 'destructive' && styles.buttonDanger,
-                ]}
-                onPress={() => handleClose(button.onPress)}>
-                <Text
+          <View style={[styles.actions, isTwoButtons && styles.actionsRow]}>
+            {dialog.buttons.map((button, index) => {
+              const isCancel = button.style === 'cancel';
+              const isDestructive = button.style === 'destructive';
+
+              return (
+                <Pressable
+                  key={`${button.text}_${index}`}
+                  accessibilityRole="button"
                   style={[
-                    styles.buttonText,
-                    button.style === 'cancel' && styles.buttonTextSecondary,
-                    button.style === 'destructive' && styles.buttonTextDanger,
-                  ]}>
-                  {button.text}
-                </Text>
-              </Pressable>
-            ))}
+                    styles.button,
+                    isTwoButtons && styles.buttonFlex,
+                    isCancel && styles.buttonSecondary,
+                    isDestructive && styles.buttonDanger,
+                  ]}
+                  onPress={() => handleClose(button.onPress)}>
+                  <Text
+                    style={[
+                      styles.buttonText,
+                      isCancel && styles.buttonTextSecondary,
+                      isDestructive && styles.buttonTextDanger,
+                    ]}>
+                    {button.text}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
         </View>
       </View>
@@ -67,40 +76,55 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     justifyContent: 'center',
+    alignItems: 'center',
     paddingHorizontal: spacing.xl,
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(12,18,30,0.38)',
+    backgroundColor: colors.overlay,
   },
   card: {
-    backgroundColor: colors.surfaceRaised,
-    borderRadius: radius.xl,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border,
     padding: spacing.xl,
-    gap: spacing.lg,
+    gap: spacing.md,
+    width: '100%',
+    maxWidth: 440,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+      },
+    }),
   },
   title: {
     color: colors.text,
-    fontSize: 22,
+    fontSize: 19,
     fontWeight: '800',
   },
   message: {
     color: colors.textMuted,
-    fontSize: 15,
-    lineHeight: 22,
+    fontSize: 14,
+    lineHeight: 21,
   },
   actions: {
     gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  actionsRow: {
+    flexDirection: 'row',
   },
   button: {
-    minHeight: 50,
+    minHeight: 46,
     borderRadius: radius.md,
     backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.lg,
+  },
+  buttonFlex: {
+    flex: 1,
   },
   buttonSecondary: {
     backgroundColor: colors.surfaceMuted,
@@ -108,19 +132,17 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   buttonDanger: {
-    backgroundColor: colors.dangerSoft,
-    borderWidth: 1,
-    borderColor: colors.danger,
+    backgroundColor: colors.danger,
   },
   buttonText: {
     color: colors.white,
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   buttonTextSecondary: {
     color: colors.text,
   },
   buttonTextDanger: {
-    color: colors.danger,
+    color: colors.white,
   },
 });

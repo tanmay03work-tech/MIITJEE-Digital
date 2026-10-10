@@ -26,6 +26,7 @@ export function AuthScreen() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [lastAttempt, setLastAttempt] = useState<AuthAttempt>(null);
+  const [fieldErrors, setFieldErrors] = useState<{ fullName?: string; email?: string; password?: string }>({});
 
   const { signIn, signUp, signInWithGoogle, isLoading, error, errorKind, clearError } = useAuthStore();
   const { showLoader, hideLoader } = useLoader();
@@ -33,18 +34,39 @@ export function AuthScreen() {
   useEffect(() => {
     if (isLoading) {
       showLoader({
-        title: 'Signing you in',
-        subtitle: 'Completing your secure MIITJEE Digital login and restoring your session.',
+        title: mode === 'signin' ? 'Signing you in' : 'Creating your account',
+        subtitle: 'Connecting securely to MIITJEE Digital...',
       });
       return;
     }
 
     hideLoader();
-  }, [hideLoader, isLoading, showLoader]);
+  }, [hideLoader, isLoading, mode, showLoader]);
 
   useEffect(() => () => hideLoader(), [hideLoader]);
 
   const handleSubmit = async () => {
+    const errs: { fullName?: string; email?: string; password?: string } = {};
+    if (mode === 'signup' && !fullName.trim()) {
+      errs.fullName = 'Full name is required';
+    }
+    if (!email.trim()) {
+      errs.email = 'Email address is required';
+    } else if (!email.includes('@')) {
+      errs.email = 'Please enter a valid email address';
+    }
+    if (!password) {
+      errs.password = 'Password is required';
+    } else if (password.length < 6) {
+      errs.password = 'Password must be at least 6 characters';
+    }
+
+    if (Object.keys(errs).length > 0) {
+      setFieldErrors(errs);
+      return;
+    }
+    setFieldErrors({});
+
     try {
       if (mode === 'signin') {
         setLastAttempt('signin');
@@ -138,7 +160,17 @@ export function AuthScreen() {
 
         {mode === 'signup' ? (
           <>
-            <InputField label="Full Name" placeholder="Enter your full name" value={fullName} onChangeText={setFullName} />
+            <InputField
+              label="Full Name"
+              placeholder="Enter your full name"
+              value={fullName}
+              onChangeText={(val) => {
+                setFullName(val);
+                if (fieldErrors.fullName) setFieldErrors((prev) => ({ ...prev, fullName: undefined }));
+              }}
+              error={fieldErrors.fullName}
+              required
+            />
 
             <View style={styles.roleWrap}>
               <Text style={styles.roleLabel}>Choose Account Type</Text>
@@ -168,7 +200,12 @@ export function AuthScreen() {
           autoCapitalize="none"
           keyboardType="email-address"
           value={email}
-          onChangeText={setEmail}
+          onChangeText={(val) => {
+            setEmail(val);
+            if (fieldErrors.email) setFieldErrors((prev) => ({ ...prev, email: undefined }));
+          }}
+          error={fieldErrors.email}
+          required
         />
 
         <InputField
@@ -176,7 +213,12 @@ export function AuthScreen() {
           placeholder="Enter password"
           secureTextEntry={!showPassword}
           value={password}
-          onChangeText={setPassword}
+          onChangeText={(val) => {
+            setPassword(val);
+            if (fieldErrors.password) setFieldErrors((prev) => ({ ...prev, password: undefined }));
+          }}
+          error={fieldErrors.password}
+          required
           rightAccessory={
             <AnimatedPressable style={styles.passwordToggle} onPress={() => setShowPassword((current) => !current)}>
               {showPassword ? <EyeOff size={18} color={colors.textMuted} /> : <Eye size={18} color={colors.textMuted} />}
@@ -187,7 +229,10 @@ export function AuthScreen() {
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-        <Button onPress={() => void handleSubmit()} loading={isLoading}>
+        <Button
+          onPress={() => void handleSubmit()}
+          loading={isLoading}
+          loadingText={mode === 'signin' ? 'Signing In...' : 'Creating Account...'}>
           {mode === 'signin' ? 'Sign In' : 'Create Account'}
         </Button>
 

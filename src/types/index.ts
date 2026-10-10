@@ -97,9 +97,9 @@ export interface TestQuestion {
   type: QuestionType;
   prompt: string;
   options: string[];
-  correctAnswer: string;
+  correctAnswer?: string;
   integerAnswer?: number | null;
-  explanation: string;
+  explanation?: string;
   imageUrl?: string | null;
   optionImageUrls?: string[];
   sourcePage?: number;
@@ -137,6 +137,7 @@ export interface TestAttemptReviewItem {
   isUnattempted?: boolean;
   explanation: string;
   imageUrl?: string | null;
+  subject?: string | null;
 }
 
 export interface LeaderboardEntry {
@@ -309,6 +310,7 @@ export interface SubmitAttemptPayload {
   userId: string;
   answers: Record<string, string>;
   studentName?: string;
+  questions?: TestQuestion[];
 }
 
 export interface SubmittedTestResponse {
@@ -318,30 +320,6 @@ export interface SubmittedTestResponse {
   user?: AppUser;
 }
 
-export interface PdfImportPayload {
-  pdfUrl: string;
-  answerKeyPdfUrl?: string;
-  testTitle?: string;
-  subject?: string;
-  startQuestionNumber?: number;
-  importMode?: 'replace' | 'append';
-}
-
-export interface PdfImportResponse {
-  questions: Array<{
-    type: QuestionType;
-    question: string;
-    options: string[];
-    correctAnswer: string;
-    integerAnswer?: number;
-    explanation: string;
-    image: string | null;
-    has_image?: boolean;
-  }>;
-  warnings: string[];
-  provider?: 'openai' | 'gemini';
-  ocrTextPreview?: string;
-}
 
 export interface QuestionBankSet {
   setId: number;
@@ -353,6 +331,7 @@ export interface QuestionBankSet {
 export interface QuestionBankQuestion {
   id: number | string;
   setId: number;
+  position?: number;
   question: string;
   options: string[];
   type: QuestionType;

@@ -44,9 +44,10 @@ import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
 import { colors, radius, spacing } from '../../theme';
 import { CreateTestQuestionPayload, QuestionBankQuestion, QuestionType } from '../../types';
-import { addQuestionToSet, updateQuestionInSet } from '../../services/api/admin';
+import { addQuestionToSet, reorderQuestionSet, updateQuestionInSet } from '../../services/api/admin';
 import { uploadExamAsset } from '../../services/api/storage';
 import { formatExamTextForDisplay } from '../../utils/examText';
+import { resolveCanonicalAnswer } from '../../utils/questionCanonicalNormalization';
 
 interface QuestionSetQuestionCardProps {
   index: number;
@@ -317,7 +318,12 @@ export function QuestionSetQuestionsScreen({ navigation, route }: RootStackScree
     setIsLoading(true);
     try {
       const rows = await loadQuestionSetQuestions(setId);
-      const sorted = [...(rows || [])].sort((a, b) => Number(a.id) - Number(b.id));
+      const sorted = [...(rows || [])].sort((a, b) => {
+        const posA = typeof a.position === 'number' && a.position > 0 ? a.position : Number(a.id);
+        const posB = typeof b.position === 'number' && b.position > 0 ? b.position : Number(b.id);
+        if (posA !== posB) return posA - posB;
+        return Number(a.id) - Number(b.id);
+      });
       setQuestions(sorted);
     } catch (error) {
       Alert.alert('Unable to load questions', error instanceof Error ? error.message : 'Please try again.');
@@ -360,19 +366,8 @@ export function QuestionSetQuestionsScreen({ navigation, route }: RootStackScree
         prompt = 'Refer to the question diagram below.';
       }
 
-      let correctIdx = 0;
       let opts = (q.options || []).map((opt) => opt.trim());
       if (q.type === 'mcq') {
-        const upper = (q.correctAnswer || '').toUpperCase().trim();
-        if (upper === 'A' || upper === '1') correctIdx = 0;
-        else if (upper === 'B' || upper === '2') correctIdx = 1;
-        else if (upper === 'C' || upper === '3') correctIdx = 2;
-        else if (upper === 'D' || upper === '4') correctIdx = 3;
-        else {
-          const matchIdx = opts.findIndex((opt) => opt.toLowerCase() === (q.correctAnswer || '').toLowerCase());
-          if (matchIdx !== -1) correctIdx = matchIdx;
-        }
-
         if (opts.length === 0 || opts.every((opt) => !opt)) {
           opts = ['(A)', '(B)', '(C)', '(D)'];
         } else {
@@ -385,21 +380,18 @@ export function QuestionSetQuestionsScreen({ navigation, route }: RootStackScree
         opts = ['', '', '', ''];
       }
 
-      let intAns: number | undefined = undefined;
-      if (q.type === 'integer') {
-        const parsed = parseFloat(q.correctAnswer || '0');
-        intAns = Number.isNaN(parsed) ? 0 : parsed;
-      }
+      const resolution = resolveCanonicalAnswer(q.type, q.correctAnswer, opts);
 
       return {
         type: q.type,
         prompt,
         options: opts,
-        correctOptionIndex: correctIdx,
-        integerAnswer: intAns,
+        correctOptionIndex: resolution.correctOptionIndex >= 0 ? resolution.correctOptionIndex : 0,
+        integerAnswer: resolution.integerAnswer,
         explanation: '',
         imageUrl: q.imageUrl || null,
-        subjectLabel: 'Physics',
+        subjectLabel: (q as any).subjectLabel || 'Physics',
+        needsReview: resolution.needsReview,
       };
     });
 
@@ -522,18 +514,32 @@ export function QuestionSetQuestionsScreen({ navigation, route }: RootStackScree
   );
   const selectedCount = questionBankSelection.length;
 
-  const handleMoveQuestion = useCallback((fromIndex: number, toIndex: number) => {
-    if (fromIndex === toIndex) return;
-    if (toIndex < 0 || toIndex >= questions.length) return;
+  const handleMoveQuestion = useCallback(
+    async (fromIndex: number, toIndex: number) => {
+      if (fromIndex === toIndex) return;
+      if (toIndex < 0 || toIndex >= questions.length) return;
 
-    setQuestions((prev) => {
-      const updated = [...prev];
+      const updated = [...questions];
       const [moved] = updated.splice(fromIndex, 1);
-      if (!moved) return prev;
+      if (!moved) return;
       updated.splice(toIndex, 0, moved);
-      return updated;
-    });
-  }, [questions.length]);
+
+      const withPositions = updated.map((q, idx) => ({ ...q, position: idx + 1 }));
+      setQuestions(withPositions);
+
+      try {
+        const questionIds = withPositions.map((q) => Number(q.id));
+        await reorderQuestionSet(setId, questionIds);
+      } catch (error) {
+        console.error('Failed to persist question reordering:', error);
+        Alert.alert(
+          'Reorder Sync Error',
+          'Failed to save new question order to server. Please try again.',
+        );
+      }
+    },
+    [questions, setId],
+  );
 
   const handleOpenMoveDialog = useCallback((index: number) => {
     setReorderingTargetIndex(index);
@@ -562,28 +568,37 @@ export function QuestionSetQuestionsScreen({ navigation, route }: RootStackScree
     if (questions.length <= 1) return;
     Alert.alert(
       'Shuffle All Questions?',
-      `This will randomize the order of all ${questions.length} questions in this set. You can adjust individual positions afterwards.`,
+      `This will randomize the order of all ${questions.length} questions in this set and save the order. You can adjust individual positions afterwards.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Shuffle Order',
-          onPress: () => {
-            setQuestions((prev) => {
-              const shuffled = [...prev];
-              for (let i = shuffled.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                const temp = shuffled[i]!;
-                shuffled[i] = shuffled[j]!;
-                shuffled[j] = temp;
-              }
-              return shuffled;
-            });
-            Alert.alert('Questions Shuffled', 'Questions order has been randomized!');
+          onPress: async () => {
+            const shuffled = [...questions];
+            for (let i = shuffled.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              const temp = shuffled[i]!;
+              shuffled[i] = shuffled[j]!;
+              shuffled[j] = temp;
+            }
+            const withPositions = shuffled.map((q, idx) => ({ ...q, position: idx + 1 }));
+            setQuestions(withPositions);
+            try {
+              const questionIds = withPositions.map((q) => Number(q.id));
+              await reorderQuestionSet(setId, questionIds);
+              Alert.alert('Questions Shuffled', 'Questions order has been randomized and saved!');
+            } catch (error) {
+              console.error('Failed to persist shuffled order:', error);
+              Alert.alert(
+                'Shuffle Sync Error',
+                'Failed to save shuffled order to server. Please try again.',
+              );
+            }
           },
         },
       ],
     );
-  }, [questions.length]);
+  }, [questions, setId]);
 
   const renderQuestionItem = useCallback(
     ({ item, index }: { item: QuestionBankQuestion; index: number }) => (
@@ -938,7 +953,7 @@ export function QuestionSetQuestionsScreen({ navigation, route }: RootStackScree
                     <Check size={16} color={colors.white} />
                   )}
                   <Text style={styles.modalSaveButtonText}>
-                    {isAddingQuestion ? 'Add to Set' : 'Save Changes'}
+                    {isSavingEdit ? 'Saving Question...' : isAddingQuestion ? 'Add to Set' : 'Save Changes'}
                   </Text>
                 </AnimatedPressable>
               </View>
